@@ -90,7 +90,7 @@ jobs:
           REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
         run: node ../scripts/private-evidence.mjs smoke
       - name: 公开汇总计时
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
         run: |
           node --input-type=module -e "import fs from 'node:fs'; const t=JSON.parse(fs.readFileSync('run/read-only-window/timing.json')); const r=fs.existsSync('run/read-only-window/result.json')?JSON.parse(fs.readFileSync('run/read-only-window/result.json')):{}; const out={status:t.status,collector_seconds:t.collector_seconds,protected_reports_state_unchanged:t.protected_reports_state_unchanged,alarm_rows:r.alarm_rows,device_attempts:r.device_attempts,heartbeat_complete:r.heartbeat_complete,heartbeat_incomplete:r.heartbeat_incomplete,pending_devices:r.pending_devices}; console.log(JSON.stringify(out)); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'完整只读区间测试（未写报告）\\n\\n'+JSON.stringify(out,null,2));"
       - name: 检查测试结果
