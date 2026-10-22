@@ -19,7 +19,9 @@ export function privateStore(env = process.env, fetchImpl = fetch) {
   const call = async (suffix, { method = 'GET', body, binary = false, upload = false } = {}) => {
     const response = await fetchImpl((upload ? `https://uploads.github.com/repos/${repository}` : base) + suffix, {
       method, redirect: 'manual', signal: AbortSignal.timeout(180_000),
-      headers: { ...headers, Accept: binary ? 'application/octet-stream' : headers.Accept,
+      // Actions archive downloads require the API JSON media type even though
+      // their redirect serves ZIP bytes. Release assets require octet-stream.
+      headers: { ...headers, Accept: binary && !/^\/actions\/artifacts\/\d+\/zip$/.test(suffix) ? 'application/octet-stream' : headers.Accept,
         ...(body ? { 'Content-Type': upload ? 'application/zip' : 'application/json' } : {}) },
       body: body && (upload ? body : JSON.stringify(body)),
     });

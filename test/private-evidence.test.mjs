@@ -27,7 +27,22 @@ test('公开仓库及同仓配置均拒绝写入；下载签名URL不携带令�
   });
   assert.deepEqual(await store.call('/releases/assets/1',{binary:true}),Buffer.from([1,2]));
   assert.equal(calls[0].options.headers.Authorization,'Bearer fixture-secret');
+  assert.equal(calls[0].options.headers.Accept,'application/octet-stream');
   assert.equal(calls[1].options.headers,undefined);
+});
+
+test('Actions旧证据下载使用JSON API请求头，签名ZIP下载不带凭据',async()=>{
+  const calls=[];
+  const store=privateStore(env,async(url,options)=>{
+    calls.push({url,options});
+    if(calls.length===1){
+      assert.equal(options.headers.Accept,'application/vnd.github+json');
+      return {status:302,headers:new Map([['location','https://example.blob.core.windows.net/artifact?sig=fixture']])};
+    }
+    assert.equal(options.headers,undefined);
+    return {ok:true,arrayBuffer:async()=>new Uint8Array([3,4]).buffer};
+  });
+  assert.deepEqual(await store.call('/actions/artifacts/12/zip',{binary:true}),Buffer.from([3,4]));
 });
 test('旧私有Actions附件恢复兼容，错误来源及路径不能导入',async t=>{
   const root=await fixture(t);
