@@ -52,7 +52,8 @@ test('私有证据上传后必须回读校验；备份失败不允许提交成�
       if(failBackup&&suffix.includes('reports-and'))throw Error('backup failed');
       uploads.push(options.body);return {id:uploads.length,state:'uploaded',size:options.body.length};
     }
-    return corrupted?Buffer.from('corrupt'):uploads[0];
+    const assetId = Number(suffix.split('/').at(-1));
+    return corrupted?Buffer.from('corrupt'):uploads[assetId-1];
   }};
   const pointer=await saveEvidence(root,{env,store});
   assert.equal(pointer.storage,'release_asset');
