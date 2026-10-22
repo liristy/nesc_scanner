@@ -123,7 +123,7 @@ export async function saveAuditOutputs(config,{window,alarms,recovered,warnings,
   }
   return result;
 }
-export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(),beforeCommit=()=>{},onRetry=()=>{},Platform=JYPlatform,retryOptions={}}={}) {
+export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(),beforeCommit=()=>{},onRetry=()=>{},Platform=JYPlatform,retryOptions={},windowOverride,saveOutputs=saveAuditOutputs}={}) {
   const root=config.projectRoot, previousState=await readJson(config.paths.state,{items:[]});
   const pendingPolicy=currentDayPending(config);
   const calendars=config.workdayCalendars ?? [CALENDAR_2026];
@@ -136,7 +136,7 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
     if(cutoff>=pending.endText)pending=null;
   }
   const windowNow=auditWindowNow(now,{date:config.auditDate,event:process.env.GITHUB_EVENT_NAME,refName:process.env.GITHUB_REF_NAME,defaultBranch:process.env.JY_DEFAULT_BRANCH});
-  const window=pendingPolicy?currentDayWindow(windowNow,previousState,collectionState,calendars):pending?{...pending,start:new Date(pending.start),end:new Date(pending.end)}:buildDailyAuditWindow(windowNow,previousState,collectionState,calendars);
+  const window=windowOverride ?? (pendingPolicy?currentDayWindow(windowNow,previousState,collectionState,calendars):pending?{...pending,start:new Date(pending.start),end:new Date(pending.end)}:buildDailyAuditWindow(windowNow,previousState,collectionState,calendars));
   if(window.alreadyComplete)return {status:'skipped',completed_at:beijingText(now),message:'本次每日采集或正式报告区间已完成，无需重复核查'};
   const dailyCache=await readDailyCache(root,window);
   // A holiday's accepted tracking list is newer than the last formal report.
@@ -284,7 +284,7 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
       const refreshedRows=new Map(refresh.rows.map(r=>[`${r['电池组编号']}\0${r['报警（级别：类型）']}\0${r['最早报警时间']}`,r]));
       const rows=parsed.rows.map(r=>refreshedRows.get(`${r['电池组编号']}\0${r['报警（级别：类型）']}\0${r['最早报警时间']}`) ?? r);
       logger.progress({phase:'saving',stage:'保存报告与滚动证据',active_workers:[],current_sn:'',estimated_remaining_seconds:null});
-      const result=await saveAuditOutputs(config,{window,alarms,recovered:selection.recovered,warnings:[...new Set(warnings)],snapshots,evidence,previousState,complete,checkedAt,rows},()=>{if(complete)beforeCommit();});
+      const result=await saveOutputs(config,{window,alarms,recovered:selection.recovered,warnings:[...new Set(warnings)],snapshots,evidence,previousState,complete,checkedAt,rows},()=>{if(complete)beforeCommit();});
       if(!complete) {
         throw Object.assign(new Error(`必要核查未完成：${[...new Set(warnings)].slice(0,4).join('；')}；已保留暂存报告与续查进度`),{code:'AUDIT_INCOMPLETE'});
       }

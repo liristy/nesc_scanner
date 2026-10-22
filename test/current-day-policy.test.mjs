@@ -10,11 +10,35 @@ import { reportScheduleDecision } from '../scripts/report-schedule-gate.mjs';
 import { collectionContinuation } from '../scripts/continue-collection.mjs';
 import { prepare, finalize } from '../scripts/cloud-runtime.mjs';
 import { analyzeWeek } from '../src/audit-rules.mjs';
+import {readOnlyWindow,protectedFiles,saveReadOnlyOutputs} from '../scripts/readonly-window.mjs';
 
 const logger={info(){},warn(){},progress(){}};
 const headers=['最早报警时间','修复时间','电池组编号','报警（级别：类型）','处理状态','BMS厂商'];
 const row=(sn,type='短路',time='2026-09-28 12:00:00')=>Object.fromEntries(headers.map((h,i)=>[h,[time,'',sn,`保护:${type}`,'未处理','JY'][i]]));
 const detail={detailVersion:2,bms:'F1-real',model:'real-model',cellsComplete:true,cells:[{index:1,voltage:3.4}],online:true};
+test('完整只读测试使用任意已到达截止，左开右闭且不写报告或正式状态',async t=>{
+  const config=await fixture(t),baseline=await protectedFiles(config.projectRoot);
+  const window=readOnlyWindow('2026-09-27 16:00:00','2026-09-28 23:41:51',new Date('2026-09-29T00:00:00+08:00'));
+  const rows=[row('left','短路',window.startText),row('inside','短路','2026-09-27 16:00:01'),row('end','短路',window.endText),row('after','短路','2026-09-28 23:41:52')];
+  const reads=[];
+  class Platform {
+    async open(){} async close(){}
+    async queryAlarmAndDownload(query,{bmsNumbers}) {
+      const selected=bmsNumbers.length?rows.filter(r=>bmsNumbers.includes(r['电池组编号'])):rows;
+      return {buffer:await workbook(selected),resultCount:selected.length};
+    }
+    async fetchBatterySnapshots(sns,options) {
+      assert.equal(options.endText,window.endText);reads.push(...sns);
+      this.heartbeatEvidence=new Map(sns.map(sn=>[sn,{complete:true,records:[{time:window.endText,minVoltage:3.4,maxVoltage:3.5}],detail}]));
+      return new Map(sns.map(sn=>[sn,{detail}]));
+    }
+  }
+  const result=await runAudit(config,logger,{now:new Date('2026-09-28T23:41:51+08:00'),Platform,retryOptions:{delays:[]},windowOverride:window,saveOutputs:saveReadOnlyOutputs});
+  assert.deepEqual(reads.sort(),['end','inside']);assert.equal(result.alarm_devices,2);
+  assert.deepEqual(await protectedFiles(config.projectRoot),baseline);
+  assert.equal(await readJson(path.join(config.projectRoot,'run/read-only-window/result.json')).then(r=>r.mode),'readonly_full_window');
+  assert.throws(()=>readOnlyWindow(window.startText,'2026-10-30 16:00:00',new Date('2026-09-29T00:00:00+08:00')),/尚未到达/);
+});
 async function workbook(rows) {
   const zip=new JSZip();
   zip.file('xl/worksheets/sheet1.xml',`<worksheet><sheetData>${[headers,...rows.map(r=>headers.map(h=>r[h]))].map((r,n)=>
