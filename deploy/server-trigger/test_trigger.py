@@ -2,10 +2,15 @@ import datetime as dt
 import tempfile
 import unittest
 from pathlib import Path
-from trigger import trigger, TriggerError
+from trigger import API, trigger, TriggerError
 
 
 class TriggerTest(unittest.TestCase):
+    def test_workflow_correlation_and_repository(self):
+        self.assertEqual(API, 'https://api.github.com/repos/liristy/nesc_scanner/actions/workflows/daily-report.yml')
+        workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/daily-report.yml').read_text(encoding='utf-8')
+        self.assertIn("run-name: ${{ inputs.trigger_id || 'JY 每日监测报告' }}", workflow)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
