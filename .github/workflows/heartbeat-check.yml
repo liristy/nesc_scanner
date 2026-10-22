@@ -70,7 +70,6 @@ jobs:
         env:
           JY_ALARM_USERNAME: ${{ secrets.JY_ALARM_USERNAME }}
           JY_ALARM_PASSWORD: ${{ secrets.JY_ALARM_PASSWORD }}
-          JY_CHECK_SNS: ${{ secrets.JY_CHECK_SNS }}
           JY_CHECK_DATE: ${{ inputs.date }}
           JY_CHECK_HISTORY: ${{ inputs.full_history }}
           JY_CHECK_SOURCE_ONLY: 'true'

@@ -6,9 +6,9 @@ import { atomicWriteJson, parsePlatformDateTime, identityOf } from '../src/utils
 import { downloadAlarmRows } from '../src/alarm-export.mjs';
 import { refreshPreviousAlarms } from '../src/tracking-refresh.mjs';
 import { beijingText, shiftDay } from '../src/calendar.mjs';
+import { readOnlyCheckTargets } from './check-targets.mjs';
 
-const sns=(process.env.JY_CHECK_SNS || '').trim().split(/\s+/);
-if (!sns.length || !sns[0] || sns.length > 5 || sns.some(sn => !/^[A-Za-z0-9_-]+$/.test(sn))) throw new Error('只读验收应为1至5个有效SN');
+const sns=await readOnlyCheckTargets(process.env.JY_ALARM_DATA_DIR || process.cwd(), process.env.JY_CHECK_SNS || '');
 const reportDate=process.env.JY_CHECK_DATE || shiftDay(beijingText(new Date()).slice(0,10),-1);
 if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate) || !parsePlatformDateTime(reportDate))throw new Error('验收日期无效');
 const config=await loadConfig(),logger=createRunLogger(config.projectRoot);

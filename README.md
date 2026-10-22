@@ -21,7 +21,6 @@ JY 电池报警采集程序与 GitHub Actions。报告、客户与设备数据�
 | `REPORT_REPO_TOKEN` | 仅授权私有报告库：Contents 读写、Actions 读取（用于旧证据迁移） |
 | `JY_ALARM_USERNAME` | 平台登录账号 |
 | `JY_ALARM_PASSWORD` | 平台登录密码 |
-| `JY_CHECK_SNS` | 只读验收使用的 1—5 个 SN，空格分隔；不填入公开工作流输入 |
 
 优先使用只限报告库的细粒度令牌。凭据不写入文件或日志，不使用来自 PR 的代码运行正式采集。PR 仅执行不含 Secrets 的合成测试。
 
@@ -36,7 +35,9 @@ npm run test:table
 python -m unittest discover -s deploy/server-trigger -p 'test_*.py'
 ```
 
-现场验收使用 Actions 的“心跳采集小批次验收”，只读查询，不发布报告或推进截止，详细结果保存在私有报告库的草稿 Release 中。
+现场验收使用 Actions 的“心跳采集小批次验收”，从私有库已有跟踪状态中选取最多两台具有明确SN的设备，只读查询，不发布报告或推进截止。设备名单只在私有检出目录和进程内存中使用，不保存到公开库的Secret、变量或输入；详细结果保存在私有报告库的草稿 Release 中。
+
+当前专用访问令牌仅授权 `nesc_report`，按所有者要求设为永久有效。
 
 正式入口是“JY 每日监测报告”。主线读取并写回报告库 `main`。分支手动重跑要求报告库已存在同名分支，检出和发布均使用该分支；不得回退到 `main`，也不清理主线证据。
 
