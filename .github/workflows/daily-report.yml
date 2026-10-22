@@ -1,0 +1,174 @@
+name: JY 每日监测报告
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      trigger_id:
+        description: '调度关联标识（不要填写设备或客户信息）'
+        required: false
+        type: string
+      audit_date:
+        description: '仅非主线分支可指定 YYYY-MM-DD；主线留空'
+        required: false
+        type: string
+permissions:
+  contents: read
+  checks: write
+concurrency:
+  group: jy-daily-report-${{ github.ref_name }}
+  cancel-in-progress: false
+env:
+  REPORT_REPOSITORY: liristy/nesc_report
+  JY_PUBLIC_RUN: 'true'
+jobs:
+  progress:
+    name: 实时进度入口
+    if: github.repository == 'liristy/nesc_scanner' && vars.SCANNER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      check_id: ${{ steps.init.outputs.check_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: 创建GitHub实时进度页
+        id: init
+        env:
+          JY_PROGRESS_TOKEN: ${{ github.token }}
+        run: node scripts/github-progress.mjs init
+  report:
+    needs: progress
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: private-reports
+        shell: bash
+    env:
+      TZ: Asia/Shanghai
+      JY_ALARM_CONFIG: ../github-config.json
+      JY_ALARM_DATA_DIR: ${{ github.workspace }}/private-reports
+      JY_ALARM_RUNTIME: github
+      REPORT_BRANCH: ${{ github.ref_name }}
+      JY_AUDIT_DATE: ${{ inputs.audit_date || '' }}
+      JY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: liristy/nesc_report
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.REPORT_REPO_TOKEN }}
+          path: private-reports
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: 安装采集依赖
+        working-directory: .
+        run: npm ci --omit=dev
+      - name: 核验私有报告仓库
+        env:
+          REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
+        run: node ../scripts/private-evidence.mjs verify
+      - name: 每日采集及工作日报告区间检查
+        id: gate
+        run: node ../scripts/report-schedule-gate.mjs
+      - name: 安装Chromium并检查程序
+        if: steps.gate.outputs.should_run == 'true'
+        working-directory: .
+        env:
+          JY_AUDIT_DATE: ''
+          JY_ALARM_CONFIG: github-config.json
+          JY_ALARM_DATA_DIR: ''
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          npm run check
+          npm test
+          npm run test:table
+      - name: 固定本轮截止并保存提交基线
+        id: prepare
+        if: steps.gate.outputs.should_run == 'true'
+        run: node ../scripts/cloud-runtime.mjs prepare
+      - name: 恢复私有证据（兼容旧Actions附件）
+        id: restore
+        if: steps.prepare.outcome == 'success'
+        continue-on-error: true
+        env:
+          REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
+        run: node ../scripts/private-evidence.mjs restore
+      - name: 导入可复用证据
+        if: steps.prepare.outcome == 'success'
+        run: |
+          if [[ '${{ steps.restore.outcome }}' == 'failure' ]]; then
+            rm -rf -- run/restored
+            echo '旧证据未恢复；本轮按固定区间重新读取，不将缺口当作完整证据。'
+          fi
+          node ../scripts/cloud-runtime.mjs import
+      - name: 每日采集复查，工作日生成双报告
+        id: monitor
+        if: steps.prepare.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 150
+        env:
+          JY_ALARM_USERNAME: ${{ secrets.JY_ALARM_USERNAME }}
+          JY_ALARM_PASSWORD: ${{ secrets.JY_ALARM_PASSWORD }}
+          JY_PROGRESS_TOKEN: ${{ github.token }}
+          JY_PROGRESS_CHECK_ID: ${{ needs.progress.outputs.check_id }}
+        run: |
+          mkdir -p run/private-logs
+          bash ../scripts/run-scheduled-report.sh > run/private-logs/collector.log 2>&1
+      - name: 整理滚动证据和续查进度
+        id: stage
+        if: ${{ !cancelled() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
+        run: node ../scripts/cloud-runtime.mjs stage
+      - name: 保存证据和备份到私有仓库
+        id: runtime
+        if: ${{ !cancelled() && steps.stage.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
+        run: node ../scripts/private-evidence.mjs save
+      - name: 确认证据保存后提交成功截止
+        id: finalize
+        if: ${{ !cancelled() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
+        env:
+          RUNTIME_UPLOAD_OUTCOME: ${{ steps.runtime.outcome }}
+          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
+        run: node ../scripts/cloud-runtime.mjs finalize
+      - name: 保存运行状态与双报告入口
+        id: summary
+        if: ${{ !cancelled() && steps.finalize.outcome == 'success' }}
+        env:
+          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
+        run: node ../scripts/github-summary.mjs
+      - name: 发布到私有报告仓库
+        id: publish
+        if: ${{ !cancelled() && steps.summary.outcome == 'success' }}
+        run: |
+          mkdir -p run/private-logs
+          bash ../scripts/publish-reports.sh > run/private-logs/publish.log 2>&1 || { echo '私有报告发布失败，请检查私有库权限和分支状态。'; exit 1; }
+          echo '私有报告和状态已发布。'
+      - name: 采集或保存不完整时标记失败
+        if: ${{ !cancelled() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
+        env:
+          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
+        run: node ../scripts/github-summary.mjs --check
+      - name: 更新最终进度状态
+        if: ${{ always() }}
+        env:
+          JY_PROGRESS_TOKEN: ${{ github.token }}
+          JY_PROGRESS_CHECK_ID: ${{ needs.progress.outputs.check_id }}
+          PROGRESS_OUTCOME: ${{ job.status }}
+          COLLECTION_SHOULD_RUN: ${{ steps.gate.outputs.should_run }}
+        run: node ../scripts/github-progress.mjs finish

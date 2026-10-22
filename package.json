@@ -1,0 +1,20 @@
+{
+  "name": "nesc-scanner",
+  "version": "2.4.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "monitor": "node src/main.mjs",
+    "check": "node --check src/main.mjs && node --check src/platform.mjs && node --check src/heartbeat-source.mjs && node --check src/evidence-store.mjs && node --check src/audit-runner.mjs && node --check src/progress-view.mjs && node --check src/github-progress.mjs && node --check scripts/github-progress.mjs && node --check scripts/progress-server.mjs && node --check src/heartbeat-history.mjs && node --check src/pending-verification.mjs && node --check scripts/private-evidence.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:table": "node --test test/platform-table.browser.mjs test/heartbeat-source.browser.mjs test/progress.browser.mjs",
+    "progress": "node scripts/progress-server.mjs"
+  },
+  "dependencies": {
+    "jszip": "3.10.1",
+    "playwright": "1.62.1"
+  }
+}

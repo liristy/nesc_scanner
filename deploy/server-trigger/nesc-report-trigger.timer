@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger nesc_scanner daily at 16:00 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 16:00:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=nesc-report-trigger.service
+
+[Install]
+WantedBy=timers.target

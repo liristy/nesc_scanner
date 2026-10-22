@@ -1,0 +1,19 @@
+[Unit]
+Description=Trigger nesc_scanner GitHub Actions
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+StateDirectory=nesc-report-trigger
+StateDirectoryMode=0700
+LoadCredential=github_token:/etc/nesc-report-trigger/github-token
+ExecStart=/usr/bin/python3 /opt/nesc-report-trigger/trigger.py
+TimeoutStartSec=5min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
