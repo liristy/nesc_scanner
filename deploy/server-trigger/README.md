@@ -4,9 +4,9 @@
 
 ## 部署前提
 
-- GitHub main 已包含可选的 trigger_id 工作流输入。本目录脚本使用该标识核对本次运行，避免把其他手动运行误认为触发成功。
+- GitHub main 已包含可选的 trigger_id 工作流输入，并通过 run-name 显示该标识。本目录脚本以此核对本次运行，避免把其他手动运行误认为触发成功。
 - Debian 12 已安装 python3、ca-certificates、tzdata，使用 systemd。无需 Node.js、Chromium 或采集账号。
-- 由仓库所有者配置仅限 liristy/nesc_scanner 的 GitHub 凭据，细粒度令牌需要 Actions: Read and write。令牌过期时需更新。不要使用更广权限的个人凭据，不要将令牌提交到仓库或发送到聊天。
+- 沿用原服务器专用令牌，将仓库范围由 liristy/nesc_report 改为仅限 liristy/nesc_scanner，保留 Actions: Read and write 及必要 Metadata 读取。按所有者要求设为永久有效，不增加 Contents 或私有报告库权限；不要将令牌提交到仓库或发送到聊天。
 - 将令牌放入服务器 /etc/nesc-report-trigger/github-token（root 所有，目录 0700，文件 0600），由 systemd LoadCredential 传入服务。脚本不会记录令牌。
 
 ## 安装及验收
@@ -25,7 +25,7 @@ systemctl daemon-reload
 
 配置凭据后运行一次 `systemctl start nesc-report-trigger.service`，并通过 `journalctl -u nesc-report-trigger.service -n 30 --no-pager` 核对运行链接。日志确认的是触发成功，采集结果以 Actions 为准。
 
-确认新运行对应当前 main 后，再执行 `systemctl enable --now nesc-report-trigger.timer`。用 `systemctl list-timers nesc-report-trigger.timer` 检查下次时间。仅在服务器联调成功后停用原 ChatGPT 触发，避免迁移期间漏跑。
+确认新运行对应当前 main 后，再执行 `systemctl enable --now nesc-report-trigger.timer`。用 `systemctl list-timers nesc-report-trigger.timer` 检查下次时间。服务器联调成功后移除 GitHub 原生 schedule，避免两套定时重复运行；Actions 保留 workflow_dispatch。
 
 ## 防重复与失败处理
 

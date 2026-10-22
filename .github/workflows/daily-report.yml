@@ -1,8 +1,6 @@
 name: JY 每日监测报告
 run-name: ${{ inputs.trigger_id || 'JY 每日监测报告' }}
 on:
-  schedule:
-    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       trigger_id:

@@ -10,6 +10,7 @@ class TriggerTest(unittest.TestCase):
         self.assertEqual(API, 'https://api.github.com/repos/liristy/nesc_scanner/actions/workflows/daily-report.yml')
         workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/daily-report.yml').read_text(encoding='utf-8')
         self.assertIn("run-name: ${{ inputs.trigger_id || 'JY 每日监测报告' }}", workflow)
+        self.assertNotIn('  schedule:', workflow)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
