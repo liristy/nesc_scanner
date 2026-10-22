@@ -92,8 +92,9 @@ jobs:
           exit 1
       - name: 更新最终进度状态
         if: ${{ always() }}
+        working-directory: .
         env:
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
           PROGRESS_OUTCOME: ${{ job.status }}
-        run: node ../scripts/github-progress.mjs finish
+        run: node scripts/github-progress.mjs finish

@@ -166,9 +166,10 @@ jobs:
         run: node ../scripts/github-summary.mjs --check
       - name: 更新最终进度状态
         if: ${{ always() }}
+        working-directory: .
         env:
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ needs.progress.outputs.check_id }}
           PROGRESS_OUTCOME: ${{ job.status }}
           COLLECTION_SHOULD_RUN: ${{ steps.gate.outputs.should_run }}
-        run: node ../scripts/github-progress.mjs finish
+        run: node scripts/github-progress.mjs finish
