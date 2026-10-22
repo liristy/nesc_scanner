@@ -11,9 +11,11 @@ test('只读验收名单读取私有跟踪状态，去重限两台且不猜测BM
   await fs.mkdir(path.join(root,'state'));
   await assert.rejects(readOnlyCheckTargets(root),/状态缺失/);
   await fs.writeFile(path.join(root,'state/current_tracking.json'),JSON.stringify({items:[
-    {bms_number:'BMS-ONLY'},{sn:'invalid/id'},{sn:'SN-A'},{sn:'SN-A'},{sn:'SN-B'},{sn:'SN-C'},
+    {bms_number:'BMS-ONLY'},{sn:'invalid/id'},{sn:'SN-A',time:'2026-09-01 12:00:00'},
+    {sn:'SN-B',time:'2026-10-22 12:00:00'},{sn:'SN-B',time:'2026-10-22 13:00:00'},
+    {sn:'SN-C',time:'2026-10-22 11:00:00'},
   ]}));
-  assert.deepEqual(await readOnlyCheckTargets(root),['SN-A','SN-B']);
+  assert.deepEqual(await readOnlyCheckTargets(root),['SN-B','SN-C']);
   await fs.writeFile(path.join(root,'state/current_tracking.json'),JSON.stringify({items:[{bms_number:'BMS-ONLY'}]}));
   await assert.rejects(readOnlyCheckTargets(root),/不能猜测/);
 });

@@ -35,7 +35,7 @@ npm run test:table
 python -m unittest discover -s deploy/server-trigger -p 'test_*.py'
 ```
 
-现场验收使用 Actions 的“心跳采集小批次验收”，从私有库已有跟踪状态中选取最多两台具有明确SN的设备，只读查询，不发布报告或推进截止。设备名单只在私有检出目录和进程内存中使用，不保存到公开库的Secret、变量或输入；详细结果保存在私有报告库的草稿 Release 中。
+现场验收使用 Actions 的“心跳采集小批次验收”，从私有库已有跟踪状态中按报警时间从新到旧选取最多两台具有明确SN的设备，要求读取非空且完整的心跳记录，只读查询，不发布报告或推进截止。设备名单只在私有检出目录和进程内存中使用，不保存到公开库的Secret、变量或输入；详细结果保存在私有报告库的草稿 Release 中。
 
 当前专用访问令牌仅授权 `nesc_report`，按所有者要求设为永久有效。
 
@@ -44,6 +44,8 @@ python -m unittest discover -s deploy/server-trigger -p 'test_*.py'
 迁移后先配置 Secrets 并完成只读小批次验收，再把仓库 Actions Variable `SCANNER_ENABLED` 设置为 `true` 启用正式采集；未启用时定时和手动日报都跳过采集。
 
 GitHub schedule 为正式定时入口。`deploy/server-trigger/` 保留服务器触发实现，若以后改用服务器，应停用 schedule 并更新专用令牌目标，避免两套调度同时启用。
+
+GitHub 会在公开库连续60天没有仓库活动时自动停用定时工作流（[官方说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows)）；这种情况下需在Actions重新启用。永久有效的报告库令牌不改变GitHub的定时工作流管理规则。
 
 ## 证据保留
 

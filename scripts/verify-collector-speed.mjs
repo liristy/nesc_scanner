@@ -37,7 +37,10 @@ try {
   });
   const summary={reportDate,results:results.map(r=>({transport:r.transport,seconds:r.seconds})),comparisons};
   await atomicWriteJson(path.join(config.projectRoot,'run/speed-check/summary.json'),summary);
-  if(comparisons.some(c=>sourceOnly?!c.sourceComplete:!c.equal)) { console.info(JSON.stringify(summary,null,2)); throw new Error(sourceOnly?'定向只读核查仍存在证据缺口':'新旧心跳证据未全部一致，不能合并主线'); }
+  if(comparisons.some(c=>sourceOnly?!c.sourceComplete||!(c.sourceRows>0):!c.equal||!(c.sourceRows>0)||!(c.renderedRows>0))) {
+    console.info(JSON.stringify(summary,null,2));
+    throw new Error(sourceOnly?'只读验收未取得非空且完整的心跳证据':'新旧心跳证据未取得非空完整且一致的结果');
+  }
   if(process.env.JY_CHECK_ALARM_REFRESH==='true') {
     const p=await new JYPlatform(config,logger).open();
     try {
