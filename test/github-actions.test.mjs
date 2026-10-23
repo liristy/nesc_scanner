@@ -34,6 +34,31 @@ test('README链接随实际日报日期更新；失败保留已有入口，正�
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const summaryScript = path.join(root, 'scripts/github-summary.mjs');
 
+test('定时入口从程序库和独立私有报告目录启动，保留相对配置及数据目录，启动错误可保存诊断', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'jy split launcher '));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash';
+  const privateRoot = path.join(directory, 'private reports');
+  await fs.mkdir(privateRoot);
+  await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ windowMode: 'launcher-test-invalid' }));
+  for (const cwd of [root, privateRoot]) {
+    const dataRoot = path.join(privateRoot, cwd === root ? 'from-program' : 'from-private');
+    const result = spawnSync(bash, [path.join(root, 'scripts/run-scheduled-report.sh').replaceAll('\\', '/')], {
+      cwd, encoding: 'utf8', env: {
+        ...process.env, JY_ALARM_DATA_DIR: dataRoot, JY_ALARM_RUNTIME: 'github',
+        JY_ALARM_CONFIG: path.relative(cwd, path.join(directory, 'config.json')),
+      },
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /windowMode 必须为/);
+    assert.doesNotMatch(result.stderr, /MODULE_NOT_FOUND/);
+    const saved = JSON.parse(await fs.readFile(path.join(dataRoot, 'run/last-result.json'), 'utf8'));
+    assert.equal(saved.status, 'error');
+    assert.match(saved.message, /windowMode 必须为/);
+    assert.match(await fs.readFile(saved.error_report_path, 'utf8'), /windowMode 必须为/);
+  }
+});
+
 test('休息日采集状态单独保存，不覆盖正式报告状态、README或创建假期报告链接', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'jy-collection-summary-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
