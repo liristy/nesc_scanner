@@ -13,7 +13,7 @@ import { analyzeWeek } from '../src/audit-rules.mjs';
 
 const logger={info(){},warn(){},progress(){}};
 const headers=['最早报警时间','修复时间','电池组编号','报警（级别：类型）','处理状态','BMS厂商'];
-const row=(sn,type='短路',time='2026-09-28 12:00:00')=>Object.fromEntries(headers.map((h,i)=>[h,[time,'',sn,`保护:${type}`,'未处理','JY'][i]]));
+const row=(sn,type='电量不足',time='2026-09-28 12:00:00')=>Object.fromEntries(headers.map((h,i)=>[h,[time,'',sn,`保护:${type}`,'未处理','JY'][i]]));
 const detail={detailVersion:2,bms:'F1-real',model:'real-model',cellsComplete:true,cells:[{index:1,voltage:3.4}],online:true};
 async function workbook(rows) {
   const zip=new JSZip();
@@ -149,7 +149,7 @@ for(const failure of ['cells','heartbeat','summary','empty_voltage','recovery','
 
 test('休息日待确认及未恢复对象从最新每日跟踪延续；新日报只导出当天窗口',async t=>{
   const config=await fixture(t),queries=[];
-  const old=row('holiday','短路','2026-10-11 15:00:00');let day='2026-10-11',fail=true;
+  const old=row('holiday','电量不足','2026-10-11 15:00:00');let day='2026-10-11',fail=true;
   class Platform {
     async open(){} async close(){}
     async queryAlarmAndDownload(query,{bmsNumbers}) {
@@ -231,7 +231,7 @@ test('全量报警覆盖失败或会话失效仍判失败，不能伪造空日�
 
 test('最终复查会话中断后只续查未完成批次，设备待确认不重采，阶段不退回采集',async t=>{
   const config=await fixture(t),queries=[],progress=[];
-  const alarms=[row('A','短路','2026-09-27 17:00:00'),row('B')];
+  const alarms=[row('A','电量不足','2026-09-27 17:00:00'),row('B')];
   let opens=0,reads=0,interrupt=true;
   class Platform {
     constructor(config,logger){this.logger=logger;}
@@ -262,7 +262,7 @@ test('最终复查会话中断后只续查未完成批次，设备待确认不�
 
 test('采集中会话失效只续采中断及未开始设备，离线和超时结果保留，最终恢复仍重新查询',async t=>{
   const config=await fixture(t),queries=[],reads=[],progress=[];
-  const old={sn:'H',type:'短路',time:'2026-09-26 12:00:00',vendor:'JY',level:'保护',bms_number:'H',alarm_time:'2026-09-26 12:00:00'};
+  const old={sn:'H',type:'电量不足',time:'2026-09-26 12:00:00',vendor:'JY',level:'保护',bms_number:'H',alarm_time:'2026-09-26 12:00:00'};
   await atomicWriteJson(config.paths.state,{last_success_cutoff:'2026-09-27 16:00:00',items:[old]});
   const alarms=[row('A','单体压差过大'),row('B'),row('C'),row('D')];
   let attempts=0;
@@ -271,7 +271,7 @@ test('采集中会话失效只续采中断及未开始设备，离线和超时�
     async open(){} async close(){}
     async queryAlarmAndDownload(query,{bmsNumbers}) {
       queries.push([...bmsNumbers]);
-      const rows=bmsNumbers.length?[row('H','短路',old.time),...alarms].filter(r=>bmsNumbers.includes(r['电池组编号'])):alarms;
+      const rows=bmsNumbers.length?[row('H','电量不足',old.time),...alarms].filter(r=>bmsNumbers.includes(r['电池组编号'])):alarms;
       return {buffer:await workbook(rows),resultCount:rows.length};
     }
     async fetchBatterySnapshots(sns,options) {
@@ -306,7 +306,7 @@ test('采集中会话失效只续采中断及未开始设备，离线和超时�
 
 test('前置恢复复查中断后只补未完成批次，最终复查独立刷新已查批次',async t=>{
   const config=await fixture(t),queries=[];
-  const old=['2026-09-25','2026-09-26'].map((date,i)=>({sn:`H${i}`,type:'短路',time:date+' 12:00:00',vendor:'JY',level:'保护',bms_number:`H${i}`,alarm_time:date+' 12:00:00'}));
+  const old=['2026-09-25','2026-09-26'].map((date,i)=>({sn:`H${i}`,type:'电量不足',time:date+' 12:00:00',vendor:'JY',level:'保护',bms_number:`H${i}`,alarm_time:date+' 12:00:00'}));
   await atomicWriteJson(config.paths.state,{last_success_cutoff:'2026-09-27 16:00:00',items:old});
   let interrupted=false,reads=0;
   class Platform {
@@ -358,4 +358,49 @@ test('当天待确认报告保存失败仍不推进截止、不删除原跟踪�
   await assert.rejects(runAudit(config,logger,{now:new Date('2026-09-28T16:35:00+08:00'),Platform,retryOptions:{delays:[]}}));
   assert.equal((await readJson(config.paths.state)).last_success_cutoff,'2026-09-25 16:00:00');
   assert.equal((await readJson(path.join(config.projectRoot,'跟踪数据',evidenceName('old')))).sn,'old');
+});
+
+for (const source of ['report', 'daily']) test(`两项范围覆盖新报警和${source}历史状态，其他报警不复查、不采集、不跟踪`, async t => {
+  const config=await fixture(t), cutoff='2026-09-27 16:00:00', queries=[], reads=[];
+  const prior=['短路','MOSFET高温','单体温差过大','电量不足'].map((type,i)=>({
+    sn:`history-${i}`,bms_number:`history-${i}`,type,vendor:'JY',level:'保护',
+    time:'2026-09-26 12:00:00',alarm_time:'2026-09-26 12:00:00',
+    review:{kind:'reading_pending',status:'待确认',reason:'旧读取缺口'},
+    lowVoltage:analyzeWeek({complete:true,records:[{time:'2026-09-26 15:00:00',minVoltage:2.4,maxVoltage:3}]},cutoff),
+  }));
+  await atomicWriteJson(config.paths.state,{last_success_cutoff:cutoff,items:source==='report'?prior:[]});
+  if(source==='daily') {
+    await atomicWriteJson(path.join(config.projectRoot,'state/daily_collection.json'),{last_collection_cutoff:cutoff});
+    await atomicWriteJson(path.join(config.projectRoot,'run/daily/collection.json'),{complete:true,endText:cutoff,items:prior});
+  }
+  const current=[row('new-low','电量不足'),row('new-diff','单体压差过大'),
+    row('new-low','短路'),row('other-only','短路'),row('hot-only','MOSFET高温')];
+  class Platform {
+    async open(){} async close(){}
+    async queryAlarmAndDownload(query,{bmsNumbers}) {
+      queries.push([...bmsNumbers]);
+      const rows=bmsNumbers.length?[...current,...prior.map(a=>row(a.sn,a.type,a.time))]
+        .filter(r=>bmsNumbers.includes(r['电池组编号'])):current;
+      return {buffer:await workbook(rows),resultCount:rows.length};
+    }
+    async fetchBatterySnapshots(sns) {
+      reads.push(...sns);
+      this.heartbeatEvidence=new Map(sns.map(sn=>[sn,{complete:true,records:[
+        {time:'2026-09-28 15:00:00',minVoltage:3.4,maxVoltage:3.5}],detail}]));
+      return new Map(sns.map(sn=>[sn,{detail}]));
+    }
+  }
+  const result=await runAudit(config,logger,{now:new Date('2026-09-28T16:35:00+08:00'),Platform,retryOptions:{delays:[]}});
+  assert.equal(result.status,'success');
+  assert.deepEqual(new Set(reads),new Set(['new-low','new-diff']));
+  assert.ok(queries.flat().every(sn=>['new-low','new-diff','history-3'].includes(sn)));
+  const state=await readJson(config.paths.state);
+  assert.deepEqual(new Set(state.items.map(a=>a.type)),new Set(['单体压差过大','电量不足']));
+  assert.ok(!state.items.some(a=>['history-0','history-1','history-2','other-only','hot-only'].includes(a.sn)));
+  const data=await readJson(path.join(config.paths.data,'2026-09-28_alarm_data.json'));
+  assert.equal(data.records.length,3);
+  assert.deepEqual(new Set(data.records.map(a=>a.bms_number)),new Set(['new-low','new-diff','history-3']));
+  assert.ok(data.records.every(a=>['保护:单体压差过大','保护:电量不足'].includes(a.alarm)));
+  const brief=await fs.readFile(path.join(config.paths.reports,'今日电池报警简报.md'),'utf8');
+  assert.doesNotMatch(brief,/短路|高温相关保护|单体温差过大/);
 });

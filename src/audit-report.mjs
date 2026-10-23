@@ -50,14 +50,14 @@ export function buildAuditReports({window,alarms,recovered=[],warnings=[],trends
     '', '## 同型号集中异常','');
   const highlighted=trends.groups.filter(g=>g.count>=3).slice(0,3);
   brief.push(...(highlighted.length?highlighted.map(g=>`- ${md(g.model)}／${md(g.type)}：${g.date}新增${g.count}块；${g.label}，历史日均${g.average===null?'暂无':g.average.toFixed(1)}块（${g.baselineDays}个有效日）。`):['未观察到单组新增达到3块的集中分布；历史是否充足以工程清单为准，不据此认定没有风险。']));
-  brief.push('','## 工程重点','',`短路、高温相关保护${kept.filter(a=>/短路|高温|过温/.test(a.type)).length}条，优先核实现场工况和接线；低压证据不足及压差越界对象继续跟踪。`);
+  brief.push('','## 工程重点','','仅关注单体压差过大和电量不足；低压证据不足及压差越界对象继续跟踪。');
   if(timeoutCount)brief.push(`其中超时待验证：${timeoutCount}块，保留已取得证据，不计作完整或正常。`);
   if(warnings.length)brief.push(`数据缺口：${warnings.length}项，详见复核清单。`);
   if(reviewCount)brief.push(readingPending?`待确认：${reviewCount}块，读取失败原因已列入工程清单并保留跟踪；恢复状态未取得的记录不计入已核实未恢复数量；已核实报警仍保留，电压和风险不猜正常。`:`离线电芯待复核：${reviewCount}块，已保留跟踪，下次补读；对应未恢复压差报警暂保留统计，未判正常。`);
   if(window.initial)brief.push(readingPending?`本轮仅核查前一天${cutoffTime}至当天${cutoffTime}；更早存量只跟踪已有对象，不补跑历史区间。`:`首次按新规则核查：尚无成功截止基线，本轮从上一个法定工作日${cutoffTime}开始；更早存量仅覆盖已有跟踪对象。`);
   brief.push(`\n采集／复查完成时间：${checkedAt}。详情电芯和恢复状态可能晚于${cutoffTime}，不是${cutoffTime}现场快照。`);
   const engineer=[`# 电池报警复核清单（${window.reportDate}）`,'',`区间：(${window.startText}, ${window.endText}]；采集／复查：${checkedAt}。`,
-    '同一电池同一报警类型保留最新未恢复记录；只统计厂商字段为JY的保护报警。忽略物联网模块已解绑、物联网卡号变更、BMS编号异常。',
+    '同一电池同一报警类型保留最新未恢复记录；仅核查和统计厂商字段为JY、保护级别的单体压差过大及电量不足。',
     '补电默认细则：保护电量不足跨度≥72小时（连续三天），相邻间隔≤24小时且末条距截止≤24小时，段内无有效最低电压回升到2.8V，最新有效最低电压<2.58V，段内有进入低功耗事件。记录跨度不等于连续实时测量。',
     '', '## 读取缺口', '', ...(warnings.length?warnings.map(w=>`- ${md(w)}`):[readingPending && reviewCount?'当日报警覆盖已完成；对象读取与恢复状态缺口见待确认清单，不代表所有证据读取成功。':'报警覆盖、心跳读取与恢复复查已完成；对象级证据限制见下方。']),
     '', `## ${reviewLabel}`, '', ...(reviews.length?reviews.map(a=>`- ${md(a.sn)}／${md(a.type)}：${a.review.status==='待验证'?'待验证；':''}${md(a.review.reason)}；继续跟踪。`):['无。']),

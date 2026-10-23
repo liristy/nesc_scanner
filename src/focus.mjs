@@ -2,11 +2,12 @@ import { alarmTypeOf, md } from "./utils.mjs";
 import { directRecovery } from "./classify.mjs";
 import { analyzeLowVoltage, crossCheckEvidence, EVIDENCE_DEFAULTS } from "./evidence.mjs";
 
-export const FOCUS_CATEGORIES = ["单体压差过大", "电量不足", "高温相关保护"];
+import { MONITORED_ALARMS } from './audit-rules.mjs';
+
+export const FOCUS_CATEGORIES = MONITORED_ALARMS;
 export function focusCategory(type) {
   const name = alarmTypeOf(type);
-  if (name === "单体压差过大" || name === "电量不足") return name;
-  if (/高温|过温|温度过高/.test(name)) return "高温相关保护";
+  if (MONITORED_ALARMS.includes(name)) return name;
   return null;
 }
 
@@ -49,7 +50,7 @@ export function buildFocus({ rows, reportDate, endText, evidence = new Map(), sn
   const evidenceSNCount = uniqueSNCount - incompleteSNs.length;
   const text = summary.map(i => `${i.category}${i.recordCount}条/${i.snCount}个SN`).join("；");
   const concise = `今日专项（最早报警日期${reportDate}、截至${endText}，平台截至该时刻无有效修复记录）：${text}；合计${uniqueSNCount}个SN，压差与电量不足重叠${overlap.length}个SN。心跳完整读取${evidenceSNCount}/${uniqueSNCount}个SN；心跳不能单独证明恢复或未触发低压休眠。`;
-  const lines = ["## 今日重点专项：压差、电量不足、高温保护", "", concise, "",
+  const lines = ["## 今日重点专项：单体压差过大、电量不足", "", concise, "",
     "仅统计今日新发生且平台未记录有效修复时间的专项报警；不混入此前存量。记录条数不是触发次数。已关闭但无修复时间仍保留核查。", "",
     "| 专项 | 平台未恢复记录 | 去重SN |", "|---|---:|---:|", ...summary.map(i => `| ${i.category} | ${i.recordCount} | ${i.snCount} |`), "",
     "### 完整SN清单", "", "| 专项 | SN | 记录数 | 具体保护项 | 最新报警时间 | 报警时最低/最高单体V | 报警压差V | 报警最高温度/MOS℃ | 最新摘要时间/状态 | 证据采集 |", "|---|---|---:|---|---|---|---|---|---|---|"];

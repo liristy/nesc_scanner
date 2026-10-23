@@ -1,4 +1,4 @@
-import { alarmKey } from './audit-rules.mjs';
+import { alarmKey, isMonitoredAlarm } from './audit-rules.mjs';
 import { chinaDate } from './calendar.mjs';
 
 // These describe an unconfirmed low-voltage risk, not a failure to
@@ -23,7 +23,7 @@ export function needsHistoricalRiskFollowup(alarm, cutoff) {
 }
 
 export function buildAcquisitionPlan(selection, previousItems, cachedItems, window, {historicalReviewMode='full',previousCutoff=window.startText}={}) {
-  const prior = [...previousItems, ...cachedItems].filter(a => a.vendor === 'JY');
+  const prior = [...previousItems, ...cachedItems].filter(isMonitoredAlarm);
   const previousRisks = [...new Map(prior.filter(a => needsHistoricalRiskFollowup(a,
     historicalReviewMode==='recovery_only' && a.historicalReview ? a.historicalReview.lastEvidenceCutoff :previousCutoff)).map(a => [alarmKey(a), a])).values()];
   const candidates = [...selection.alarms, ...previousRisks];

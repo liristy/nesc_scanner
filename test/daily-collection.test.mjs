@@ -25,7 +25,7 @@ async function fixture(t) {
       dailyReports: path.join(root, 'reports/daily_reports'), data: path.join(root, 'data'), lastResult: path.join(root, 'run/last-result.json') } };
 }
 const headers = ['最早报警时间', '修复时间', '电池组编号', '报警（级别：类型）', '处理状态', 'BMS厂商'];
-const row = (sn, date) => Object.fromEntries(headers.map((h, i) => [h, [date, '', sn, '保护:短路', '未处理', 'JY'][i]]));
+const row = (sn, date) => Object.fromEntries(headers.map((h, i) => [h, [date, '', sn, '保护:电量不足', '未处理', 'JY'][i]]));
 async function workbook(rows) {
   const zip = new JSZip();
   zip.file('xl/worksheets/sheet1.xml', `<worksheet><sheetData>${[headers, ...rows.map(r => headers.map(h => r[h]))].map((r, n) =>
@@ -219,4 +219,22 @@ test('旧版失败证据、错误SN文件与未来证据不作为跨日缓存；
   p.fetchTodayHeartbeat=async()=>assert.fail('旧版检查点不能认证当前日');
   assert.equal((await p.fetchAuditEvidence(sn,reportDate,endText)).complete,true);
   assert.equal(calls[0],reportDate);assert.equal(calls.length,10);
+});
+
+test('业务范围在导出总数校验后筛选，完整及部分旧缓存都排除其他类型',async()=>{
+  const window={startText:'2026-09-27 16:00:00',endText:'2026-09-28 16:00:00',
+    start:new Date('2026-09-27T16:00:00+08:00'),end:new Date('2026-09-28T16:00:00+08:00'),
+    startDate:'2026-09-27',endDate:'2026-09-28',reportDate:'2026-09-28'};
+  const low=row('low','2026-09-28 12:00:00');
+  const diff={...low,'电池组编号':'diff','报警（级别：类型）':'保护:单体压差过大'};
+  const other={...low,'电池组编号':'other','报警（级别：类型）':'保护:短路'};
+  const full=await collectDailyAlarmRows({queryAlarmAndDownload(){assert.fail('完整缓存不重复导出');}},window,
+    {endText:window.endText,rows:[low,diff,other]});
+  assert.deepEqual(full.rows,[low,diff]);
+  const platform={async queryAlarmAndDownload(){return {buffer:await workbook([diff,other]),resultCount:2};}};
+  const partial=await collectDailyAlarmRows(platform,window,{endText:'2026-09-28 11:00:00',rows:[low,other]});
+  assert.deepEqual(partial.rows.map(r=>r['电池组编号']),['low','diff']);
+  assert.equal(partial.allRowCount,2);
+  await assert.rejects(collectDailyAlarmRows({async queryAlarmAndDownload(){return {
+    buffer:await workbook([other]),resultCount:2};}},window),/导出条数与页面不一致/);
 });

@@ -12,7 +12,7 @@ test('16:00截止前后窗口正确，旧16:30状态与归档保留真实截止�
   const window=currentDayWindow(new Date('2026-10-14T16:00:00+08:00'),old);
   assert.equal(window.startText,'2026-10-13 16:00:00');assert.equal(window.endText,'2026-10-14 16:00:00');
   assert.equal(window.alreadyComplete,false);
-  const rows=[window.startText,'2026-10-14 15:45:00',window.endText,'2026-10-14 16:00:01'].map((time,i)=>({sn:String(i),type:'短路',vendor:'JY',level:'保护',time}));
+  const rows=[window.startText,'2026-10-14 15:45:00',window.endText,'2026-10-14 16:00:01'].map((time,i)=>({sn:String(i),type:'电量不足',vendor:'JY',level:'保护',time}));
   assert.deepEqual(collectAlarms(rows,[],[],window,'2026-10-14 17:00:00').alarms.map(a=>a.sn),['1','2']);
   assert.equal(reportArchiveName('2026-10-14',window.endText),'20261014-160000');
   assert.equal(reportArchiveName('2026-10-13',old.last_success_cutoff),'20261013-163000');

@@ -17,9 +17,9 @@ test('已恢复且最新有效电压正常的电量不足对象不再采集；2.
     assert.equal(plan([item]).scope.skipped_recovered_normal, 1);
   }
 });
-test('未恢复、恢复未知、同SN其他未恢复保护仍需采集', () => {
+test('未恢复、恢复未知、同SN另一关注项未恢复保护仍需采集', () => {
   assert.deepEqual(plan([old], [], []).sns, ['old']);
-  const other = {...old,type:'短路',lowVoltage:null};
+  const other = {...old,type:'单体压差过大',lowVoltage:null};
   assert.deepEqual(plan([old,other], [], [recovered(old)]).sns, ['old']);
 });
 test('已恢复但低压、异常电压、过旧/缺失样本或未知证据缺口均继续跟踪', () => {
@@ -59,4 +59,17 @@ test('恢复复查模式仅采集当日报警；历史低压和缺口留在恢�
   const result=buildAcquisitionPlan(selection,prior,[],window,{historicalReviewMode:'recovery_only'});
   assert.deepEqual(result.sns,['old']);assert.deepEqual(new Set(result.historicalSNS),new Set(['historical','pending']));
   assert.equal(result.scope.total,1);assert.equal(result.scope.history_recovery_only,2);
+});
+
+test('旧状态和缓存中其他报警的低压及待确认缺口不重新加入风险队列',()=>{
+  const ignored=['短路','MOSFET高温','单体温差过大','自定义保护'].map((type,i)=>({
+    ...old,sn:`ignored-${i}`,type,lowVoltage:{...old.lowVoltage,minVoltage:2.4,confirmed:true},review:{kind:'reading_pending'},
+  }));
+  const selection=collectAlarms([],ignored,[],window,window.endText);
+  assert.deepEqual(selection.alarms,[]);
+  for(const historicalReviewMode of ['full','recovery_only']) {
+    const result=buildAcquisitionPlan(selection,ignored,ignored,window,{historicalReviewMode});
+    assert.deepEqual(result.previousRisks,[]);
+    assert.deepEqual(result.trackedSNS,[]);
+  }
 });

@@ -26,7 +26,7 @@ export const BASE_TEMPLATE = {
   overrideRule:false, threshold:2.5, duration:30,
 };
 export const PRESETS = [
-  {key:'focus',name:'重点专项简报',description:'压差、电量不足和高温 · 今日无有效修复记录',template:BASE_TEMPLATE},
+  {key:'focus',name:'重点专项简报',description:'单体压差过大、电量不足 · 今日无有效修复记录',template:BASE_TEMPLATE},
   {key:'all',name:'全部保护报警',description:'查看整个统计周期，包含平台已记录修复的项目',template:{...BASE_TEMPLATE,name:'保护报警总览',title:'{date} 保护报警总览',scope:'window',alarmTypes:[],recovery:'all',modules:['summary','groups','details'],fields:['sn','alarm_type','record_count','alarm_time','recovery_status','min_voltage','temperature']}},
   {key:'low',name:'低压采样专项',description:'按 SN 去重，查看低压结论与数据限制',template:{...BASE_TEMPLATE,name:'低压采样专项',title:'{date} 低压采样核查',alarmTypes:['电量不足'],grouping:'sn',modules:['summary','low','details','note'],fields:['sn','low_status','latest_voltage','sampled_minutes','latest_telemetry','low_reason']}},
 ];

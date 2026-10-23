@@ -4,7 +4,7 @@ import { readJson, atomicWriteJson } from './utils.mjs';
 import { chinaDate } from './calendar.mjs';
 import { downloadAlarmRows } from './alarm-export.mjs';
 import { evidenceSummary, trackingName } from './evidence-store.mjs';
-import { analyzeWeek } from './audit-rules.mjs';
+import { analyzeWeek, isMonitoredAlarm } from './audit-rules.mjs';
 
 export const dailyCachePath = root => path.join(root, 'run/daily/collection.json');
 export async function readDailyCache(root, window) {
@@ -25,11 +25,13 @@ export async function loadHistoricalReviewState(root, window, previousState) {
 }
 export async function collectDailyAlarmRows(platform, window, saved) {
   const startText = saved?.endText ?? window.startText;
-  if (startText === window.endText) return { rows: saved.rows };
+  if (startText === window.endText) return { rows: saved.rows.filter(isMonitoredAlarm) };
   const query = { ...window, start: chinaDate(startText), startText, startDate: startText.slice(0, 10) };
   const parsed = await downloadAlarmRows(platform, query, { vendor: 'JY', start: query.start, end: window.end, endInclusive: true });
   if (saved) platform.logger?.info(`复用每日报警统计至${saved.endText}，仅导出其后新增区间。`);
-  return { ...parsed, rows: [...(saved?.rows ?? []), ...parsed.rows] };
+  // Narrow scope only after the complete export has passed coverage checks.
+  // Apply the same rule to cached rows created before the scope change.
+  return { ...parsed, rows: [...(saved?.rows ?? []), ...parsed.rows].filter(isMonitoredAlarm) };
 }
 export async function loadRollingEvidence(root, endText, {compact=false,sns}={}) {
   const evidence = new Map();

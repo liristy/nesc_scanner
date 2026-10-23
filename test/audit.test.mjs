@@ -37,9 +37,9 @@ test('法定休息日、周末补班、固定北京时间截止及失败连续�
   assert.equal(buildAuditWindow(new Date('2026-09-28T08:00:00Z'),{last_success_cutoff:'2026-09-18 16:00:00'}).startText,'2026-09-18 16:00:00');
   assert.throws(()=>isChinaWorkday('2027-01-04'),/日历未配置/);
 });
-test('JY及保护优先过滤、忽略三项、同电池同类型取最新、恢复复查不扩大截止',()=>{
-  const rows=[row(),row('SN-A','电量不足','2026-09-28 15:00:00'),row('SN-A','短路'),row('SN-B','电量不足',undefined,{'BMS厂商':'OTHER'}),row('SN-C','电量不足',undefined,{'报警（级别：类型）':'提示:电量不足'}),...['物联网模块已解绑','物联网卡号变更','BMS编号异常'].map(t=>row('SN-D',t)),row('boundary','电量不足',window.startText),row('end','短路',window.endText),row('future','短路','2026-09-28 16:00:01')];
-  const result=collectAlarms(rows,[],[row('SN-A','短路',undefined,{'修复时间':'2026-09-28 16:00:00'}),row('new-after','短路','2026-09-28 17:00:00')],window,'2026-09-28 18:00:00');
+test('JY及保护优先过滤、仅两项、同电池同类型取最新、恢复复查不扩大截止',()=>{
+  const rows=[row(),row('SN-A','电量不足','2026-09-28 15:00:00'),row('SN-A','单体压差过大'),row('SN-B','电量不足',undefined,{'BMS厂商':'OTHER'}),row('SN-C','电量不足',undefined,{'报警（级别：类型）':'提示:电量不足'}),...['物联网模块已解绑','物联网卡号变更','BMS编号异常'].map(t=>row('SN-D',t)),row('boundary','电量不足',window.startText),row('end','电量不足',window.endText),row('future','电量不足','2026-09-28 16:00:01')];
+  const result=collectAlarms(rows,[],[row('SN-A','单体压差过大',undefined,{'修复时间':'2026-09-28 16:00:00'}),row('new-after','电量不足','2026-09-28 17:00:00')],window,'2026-09-28 18:00:00');
   assert.deepEqual(result.alarms.map(a=>[a.sn,a.time]),[['SN-A','2026-09-28 15:00:00'],['end',window.endText]]);assert.equal(result.recovered.length,1);
 });
 test('压差边界含等号，使用真实BMS体系，资料不足不能判正常',()=>{
@@ -82,8 +82,8 @@ test('单点、24小时缺口、回升、提示、异常数据、历史不全、
 });
 test('型号趋势拆分逐日，仅比较新增，历史缺口不能认定突增，保留35日汇总',()=>{
   const hist=Array.from({length:40},(_,i)=>({date:shiftDay('2026-09-27',-i),cutoffTime:'16:00',complete:true,groups:[]}));
-  const alarms=Array.from({length:3},(_,i)=>({sn:`s${i}`,type:'短路',time:'2026-09-28 12:00:00',origin:'本区间新增',detail}));
-  alarms.push({sn:'old',type:'短路',time:'2026-09-28 12:00:00',origin:'历史延续',detail});
+  const alarms=Array.from({length:3},(_,i)=>({sn:`s${i}`,type:'电量不足',time:'2026-09-28 12:00:00',origin:'本区间新增',detail}));
+  alarms.push({sn:'old',type:'电量不足',time:'2026-09-28 12:00:00',origin:'历史延续',detail});
   const result=buildTrends(alarms,window,hist);
   assert.equal(result.groups[0].count,3);assert.equal(result.groups[0].label,'新增集中出现');assert.equal(result.history.length,35);
   assert.equal(buildTrends(alarms,{...window,startDate:'2026-09-27',startText:'2026-09-27 16:00:00'},[]).groups[0].label,'历史不足、型号缺失或覆盖不全');
@@ -109,9 +109,9 @@ test('软件版本优先基本信息，导出补充，缺失和冲突不推测�
   assert.equal(bmsSoftwareVersion({...a,detail:{}}),'export-1');
   assert.equal(bmsSoftwareVersion({detail:{hardwareVersion:'HW-1'}}),'');
   assert.equal(bmsSoftwareVersion({...a,detail:{bmsSoftwareVersionError:'冲突'}}),'');
-  const selection=collectAlarms([], [{sn:'old',type:'短路',time:'2026-09-24 12:00:00',vendor:'JY',level:'保护',bmsSoftwareVersion:'SW-old'}],[],window,'2026-09-28 18:00:00');
+  const selection=collectAlarms([], [{sn:'old',type:'电量不足',time:'2026-09-24 12:00:00',vendor:'JY',level:'保护',bmsSoftwareVersion:'SW-old'}],[],window,'2026-09-28 18:00:00');
   assert.equal(bmsSoftwareVersion(selection.alarms[0]),'SW-old');
-  const report=buildAuditReports({window,alarms:[{sn:'missing',type:'短路',time:window.endText,detail:{}}],trends:{groups:[]},checkedAt:window.endText,complete:true});
+  const report=buildAuditReports({window,alarms:[{sn:'missing',type:'电量不足',time:window.endText,detail:{}}],trends:{groups:[]},checkedAt:window.endText,complete:true});
   assert.match(report.engineer,/BMS软件版本：缺失待核实/);
 });
 test('普通故障60/180秒重试且最多3次，凭据拒绝立即停止',async()=>{
@@ -168,12 +168,12 @@ async function workbook(rows) {
   const zip=new JSZip();zip.file('xl/worksheets/sheet1.xml',`<worksheet><sheetData>${xmlRow(headers,1)}${rows.map((r,i)=>xmlRow(headers.map(h=>r[h]),i+2)).join('')}</sheetData></worksheet>`);return zip.generateAsync({type:'nodebuffer'});
 }
 test('Excel前开后闭与全流程：恢复检查后正式报告，不混入截止后新报警',async()=>{
-  const buffer=await workbook([row('start','短路',window.startText),row('end','短路',window.endText)]);
+  const buffer=await workbook([row('start','电量不足',window.startText),row('end','电量不足',window.endText)]);
   assert.deepEqual((await parseAlarmWorkbook(buffer,{vendor:'JY',start:window.start,end:window.end,endInclusive:true})).rows.map(r=>r['电池组编号']),['end']);
   const config=await tempConfig();
   class Platform {
     async open(){} async close(){}
-    async queryAlarmAndDownload(query){const rows=query.reportDate.includes('tracking')?[row(),row('SN-A','短路','2026-09-28 16:31:00')]:[row()];return {buffer:await workbook(rows),resultCount:rows.length};}
+    async queryAlarmAndDownload(query){const rows=query.reportDate.includes('tracking')?[row(),row('SN-A','电量不足','2026-09-28 16:31:00')]:[row()];return {buffer:await workbook(rows),resultCount:rows.length};}
     async fetchBatterySnapshots(sns){assert.deepEqual(sns,['SN-A']);this.heartbeatEvidence=new Map([['SN-A',{...week(),detail,historyDays:Array.from({length:10},(_,i)=>shiftDay(window.reportDate,-i))}]]);return new Map([['SN-A',{detail}]]);}
   }
   try {
@@ -210,9 +210,9 @@ test('详情失败后的同截止续查复用完整初始导出，最终恢复�
 
 test('6→4→0设备缺口使用同一三轮预算，只补缺失SN，最后统一复查并保留离线例外',async()=>{
   const config=await tempConfig(),calls=[],waits=[],events=[],progress=[];
-  const prior=row('GOOD','短路','2026-09-23 12:00:00');
+  const prior=row('GOOD','电量不足','2026-09-23 12:00:00');
   const cells=Array.from({length:6},(_,i)=>`CELLS-${i+1}`);
-  const rows=[row('GOOD','短路'),...cells.map(sn=>row(sn,'单体压差过大')),row('OFFLINE','单体压差过大')];
+  const rows=[row('GOOD','电量不足'),...cells.map(sn=>row(sn,'单体压差过大')),row('OFFLINE','单体压差过大')];
   let exports=0,fetches=0,finalRefreshes=0;
   class Platform {
     async open(){} async close(){}
@@ -232,7 +232,7 @@ test('6→4→0设备缺口使用同一三轮预算，只补缺失SN，最后统
   }
   try {
     await fs.mkdir(path.dirname(config.paths.state),{recursive:true});
-    await fs.writeFile(config.paths.state,JSON.stringify({last_success_cutoff:window.startText,items:[{sn:'GOOD',type:'短路',time:prior['最早报警时间'],vendor:'JY',level:'保护',bms_number:'GOOD',alarm_time:prior['最早报警时间']}]}));
+    await fs.writeFile(config.paths.state,JSON.stringify({last_success_cutoff:window.startText,items:[{sn:'GOOD',type:'电量不足',time:prior['最早报警时间'],vendor:'JY',level:'保护',bms_number:'GOOD',alarm_time:prior['最早报警时间']}]}));
     const result=await runAudit(config,{progress:p=>progress.push(p),warn(){},info(){}},{now:new Date('2026-09-28T08:00:01Z'),Platform,
       retryOptions:{wait:async ms=>{
         waits.push(ms);assert.equal(JSON.parse(await fs.readFile(config.paths.state)).last_success_cutoff,window.startText);
@@ -429,7 +429,7 @@ test('最新报警复查已恢复时，仍核验并保留更早日期的未恢�
 });
 
 test('电芯失败不丢心跳；压差缺少逐节电压不能推进截止，续查仍重新读取电芯',async()=>{
-  for (const type of ['短路', '单体压差过大']) {
+  for (const type of ['电量不足', '单体压差过大']) {
     const config=await tempConfig();
     const missingCells={...detail,cells:[],cellsComplete:false,cellsError:'电芯详情读取失败：执行指令错误,请稍后再试'};
     let fetches=0;
@@ -446,7 +446,7 @@ test('电芯失败不丢心跳；压差缺少逐节电压不能推进截止，�
       await fs.mkdir(path.dirname(config.paths.state),{recursive:true});
       await fs.writeFile(config.paths.state,JSON.stringify({last_success_cutoff:window.startText,items:[]}));
       const run=()=>runAudit(config,{progress(){},warn(){}},{now:new Date('2026-09-28T08:00:01Z'),Platform,retryOptions:{delays:[]}});
-      if(type==='短路')assert.equal((await run()).status,'success');
+      if(type==='电量不足')assert.equal((await run()).status,'success');
       else {
         await assert.rejects(run(),/压差电芯核查未完成/);
         await assert.rejects(run(),/压差电芯核查未完成/);
@@ -546,15 +546,15 @@ test('报告完成但压差待复核的日期不进入完整趋势基线',()=>{
   assert.match(trends.groups[0].label,/历史不足/);
 });
 
-test('短路或温差电池也按心跳识别低压，补电名单按SN去重，不凭其他报警冒充持续一周',async()=>{
+test('两项关注报警按心跳识别低压，补电名单按SN去重，不凭压差报警冒充持续三天',async()=>{
   for(const sustained of [true,false]) {
     const config=await tempConfig();
     class Platform {
       async open(){} async close(){}
-      async queryAlarmAndDownload(){const rows=[row('SN-A','短路'),row('SN-A','单体温差过大')];return {buffer:await workbook(rows),resultCount:2};}
+      async queryAlarmAndDownload(){const rows=[row('SN-A','电量不足'),row('SN-A','单体压差过大')];return {buffer:await workbook(rows),resultCount:2};}
       async fetchBatterySnapshots(sns){
         assert.deepEqual(sns,['SN-A']);
-        const e=week();if(!sustained)e.records=e.records.map(r=>({...r,event:r.event==='进入低功耗'?r.event:'保护:短路'}));
+        const e=week();if(!sustained)e.records=e.records.map(r=>({...r,event:r.event==='进入低功耗'?r.event:'保护:单体压差过大'}));
         this.heartbeatEvidence=new Map([['SN-A',{...e,detail,historyDays:Array.from({length:10},(_,i)=>shiftDay(window.reportDate,-i))}]]);
         return new Map([['SN-A',{detail}]]);
       }
@@ -574,9 +574,9 @@ test('短路或温差电池也按心跳识别低压，补电名单按SN去重，
 test('压差排除项集中单列，同SN其他报警仍正式统计，具体读数及详情保留',()=>{
   const a={sn:'SAME',type:'单体压差过大',time:window.endText,origin:'本区间新增',detail:{...detail,cells:[{index:1,voltage:2.1}]} ,excluded:true};
   a.difference=classifyDifference(a.detail);
-  const report=buildAuditReports({window,alarms:[a,{...a,type:'短路',excluded:false,difference:null}],trends:{groups:[]},checkedAt:window.endText,complete:true});
-  assert.deepEqual(report.counts.map(c=>[c.type,c.count]),[['短路',1]]);
+  const report=buildAuditReports({window,alarms:[a,{...a,type:'电量不足',excluded:false,difference:null}],trends:{groups:[]},checkedAt:window.endText,complete:true});
+  assert.deepEqual(report.counts.map(c=>[c.type,c.count]),[['电量不足',1]]);
   const [retained,excluded]=report.engineer.split('## 压差越界排除项（集中复核）');
-  assert.match(retained,/### SAME · 短路/);assert.doesNotMatch(retained,/### SAME · 单体压差过大/);
+  assert.match(retained,/### SAME · 电量不足/);assert.doesNotMatch(retained,/### SAME · 单体压差过大/);
   assert.match(excluded,/### SAME · 单体压差过大/);assert.match(excluded,/1号=2.1V/);assert.match(excluded,/打开电池详情/);
 });

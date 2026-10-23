@@ -9,7 +9,7 @@ import { toRawData } from './xlsx.mjs';
 import { readDailyCache, collectDailyAlarmRows, loadRollingEvidence, loadHistoricalEvidence, loadHistoricalReviewState, saveDailyCache } from './daily-collection.mjs';
 import { refreshPreviousAlarms } from './tracking-refresh.mjs';
 import { beijingText, buildDailyAuditWindow, CALENDAR_2026, isChinaWorkday, reportArchiveName } from './calendar.mjs';
-import { collectAlarms, normalizeAlarm, classifyDifference, analyzeWeek, alarmKey, LOW_VOLTAGE_RULE, bmsSoftwareVersion } from './audit-rules.mjs';
+import { collectAlarms, normalizeAlarm, classifyDifference, analyzeWeek, alarmKey, LOW_VOLTAGE_RULE, bmsSoftwareVersion, isMonitoredAlarm } from './audit-rules.mjs';
 import { buildAuditReports, buildTrends, reportHtml } from './audit-report.mjs';
 import { generateAutomaticReports } from './custom-report.mjs';
 import { checkpointName, checkpointPath, evidenceSummary, hydrateEvidence } from './evidence-store.mjs';
@@ -148,6 +148,7 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
   }
   const reviewState=pendingPolicy?await loadHistoricalReviewState(root,window,previousState):previousState;
   const recoveryTargets=[...new Map([...(previousState.items ?? []),...(reviewState.items ?? [])]
+    .filter(isMonitoredAlarm)
     .map(a=>[`${alarmKey(a)}\0${a.time}`,a])).values()];
   await atomicWriteJson(pendingPath,window);
   // Offline live cells cannot be repaired by repeating the same history scan.

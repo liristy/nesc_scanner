@@ -8,7 +8,11 @@ export function bmsSoftwareVersion(alarm) {
   return alarm.detail?.bmsSoftwareVersion || alarm.bmsSoftwareVersion || alarm.row?.['BMS版本'] || '';
 }
 
-export const IGNORED_ALARMS = new Set(['物联网模块已解绑','物联网卡号变更','BMS编号异常']);
+export const MONITORED_ALARMS = Object.freeze(['单体压差过大', '电量不足']);
+export function isMonitoredAlarm(row) {
+  const alarm = normalizeAlarm(row);
+  return alarm.vendor === 'JY' && alarm.level === '保护' && MONITORED_ALARMS.includes(alarm.type);
+}
 export const alarmKey = a => `${a.sn}\0${a.type}`;
 export function normalizeAlarm(row) {
   return {sn:row.sn ?? row.bms_number ?? row['电池组编号'], type:row.type ?? row.alarm_type ?? String(row['报警（级别：类型）'] ?? '').replace(/^保护\s*[:：]\s*/,''),
@@ -17,7 +21,7 @@ export function normalizeAlarm(row) {
     bmsSoftwareVersion:row.bmsSoftwareVersion ?? row.bms_software_version ?? row.bms_version ?? row['BMS版本'] ?? '', row};
 }
 export function collectAlarms(rows, previousItems, refreshed, window, checkedAt) {
-  const current = rows.map(normalizeAlarm).filter(a => a.time > window.startText && a.time <= window.endText);
+  const current = rows.map(normalizeAlarm).filter(a => isMonitoredAlarm(a) && a.time > window.startText && a.time <= window.endText);
   const refresh = new Map(refreshed.map(normalizeAlarm).map(a => [`${alarmKey(a)}\0${a.time}`,a]));
   const legacyMissing = [];
   const prior = previousItems.map(item => {
@@ -26,7 +30,7 @@ export function collectAlarms(rows, previousItems, refreshed, window, checkedAt)
     if (!verified && a.vendor !== 'JY') legacyMissing.push(a.sn);
     return verified ?? a;
   });
-  const candidates = [...prior, ...current].filter(a => a.vendor === 'JY' && a.level === '保护' && a.time <= window.endText && !IGNORED_ALARMS.has(a.type));
+  const candidates = [...prior, ...current].filter(a => isMonitoredAlarm(a) && a.time <= window.endText);
   const continuing=new Set(prior.filter(a=>a.vendor==='JY' && a.level==='保护' && !(a.repair && Number.isFinite(chinaDate(a.repair).getTime()) && a.repair>=a.time && a.repair<=checkedAt)).map(alarmKey));
   const recovered = [], unresolved = new Map();
   for (const a of candidates) {
