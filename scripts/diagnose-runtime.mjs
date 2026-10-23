@@ -1,7 +1,9 @@
 // Temporary read-only diagnostic. Outputs numeric aggregates only.
 import JSZip from 'jszip';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { privateStore } from './private-evidence.mjs';
+import { validVoltage } from '../src/audit-rules.mjs';
 
 const sum = a => a.reduce((x,y)=>x+y,0);
 const round = x => Math.round(x*10)/10;
@@ -92,5 +94,26 @@ async function main() {
     previous_reused_days:sum(matched.map(([a])=>a.reused)),current_reused_days:sum(matched.map(([,b])=>b.reused)),
     query_day_transition:matched.reduce((o,[a,b])=>{const k=`${a.days}_to_${b.days}`;o[k]=(o[k]||0)+1;return o;},{}),
     previous_rows:sum(matched.map(([a])=>a.rows)),current_rows:sum(matched.map(([,b])=>b.rows))}));
+  const old=await JSZip.loadAsync(await store.call('/releases/assets/668419446',{binary:true}));
+  const availability={all:{},full_history_scan:{}};
+  for(const [sn,d] of results[1].devices) {
+    if(!d.seconds)continue;
+    const file=old.file(`tracking/${createHash('sha256').update(sn).digest('hex')}.json`);
+    let category;
+    if(!file)category='no_prior_tracking_file';
+    else {
+      const saved=JSON.parse(await file.async('string')),e=saved.evidence;
+      if(!e||!Array.isArray(e.records)||!(e.complete||e.historyCoverageVersion===1))category='prior_evidence_incomplete';
+      else {
+        const cutoff=e.coverageCutoff??saved.cutoff;
+        const eligible=Array.from({length:9},(_,i)=>`2026-10-${String(22-i).padStart(2,'0')}`).filter(date=>cutoff<'2026-10-23 16:00:00'&&date<cutoff.slice(0,10)&&e.historyDays?.includes(date));
+        const latest=e.records.filter(r=>r.time<=cutoff&&validVoltage(r)!==null).sort((a,b)=>a.time.localeCompare(b.time)).at(-1);
+        category=eligible.length?'prior_history_reusable':!latest?'prior_no_valid_voltage':validVoltage(latest)>=2.8?'prior_voltage_ge_2_8_without_reusable_history':'prior_voltage_lt_2_8_without_reusable_history';
+      }
+    }
+    availability.all[category]=(availability.all[category]||0)+1;
+    if(d.days===10)availability.full_history_scan[category]=(availability.full_history_scan[category]||0)+1;
+  }
+  console.log(JSON.stringify({prior_runtime_cache_availability:availability}));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(()=>{console.error('Private diagnostic aggregation failed; no raw diagnostics emitted.');process.exitCode=1;});
