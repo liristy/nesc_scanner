@@ -36,7 +36,7 @@ export function analyze(text) {
       const d=device(m[1]),seconds=+m[5];d.network+=seconds;d.rows+=+m[3];d.requests+=+m[4];d.days++;
       calls.push({seconds,rows:+m[3],requests:+m[4],t});
     }
-    if((m=/；(\S+) (?:已读取|待核实).*本SN含详情\/历史耗时([\d.]+)秒/.exec(line))) {
+    if((m=/；([A-Za-z0-9_-]+) (?:已读取|待核实).*本SN含详情\/历史耗时([\d.]+)秒/.exec(line))) {
       device(m[1]).seconds=+m[2];progress.push({t,seconds:+m[2]});
     }
     if((m=/SN (\S+) 复用(\d+)天完整历史心跳/.exec(line)))device(m[1]).reused=+m[2];
@@ -67,6 +67,8 @@ export function analyze(text) {
     final_recovery:markers.saving-markers.final_recovery,saving:last-markers.saving},
     device_seconds:stats(ds.map(d=>d.seconds)),non_api_device_seconds:stats(ds.map(d=>d.seconds-d.network)),
     api_calls:stats(calls.map(c=>c.seconds)),api_rows:sum(calls.map(c=>c.rows)),api_requests:sum(calls.map(c=>c.requests)),
+    queried_days_per_device:ds.reduce((o,d)=>(o[d.days]=(o[d.days]||0)+1,o),{}),
+    cumulative_completed_at_minutes:[10,20,30,40,50,60,70,80].map(minutes=>({minutes,devices:progress.filter(p=>p.t<first+minutes*60).length})),
     reused_days:sum(ds.map(d=>d.reused)),devices_reusing_days:ds.filter(d=>d.reused).length,full_reuse_devices:reuse.length,
     error_counts:errors,sampled_worker_seconds:sampled,ten_minute_slices:slices,
     slowest_anonymous:ds.sort((a,b)=>b.seconds-a.seconds).slice(0,15).map(d=>({seconds:d.seconds,api_seconds:round(d.network),requests:d.requests,rows:d.rows,queried_days:d.days,reused_days:d.reused,errors:d.errors,cell_issues:d.cells})),
@@ -87,6 +89,8 @@ async function main() {
   const matched=[...results[0].devices].filter(([sn,d])=>d.seconds>0&&results[1].devices.get(sn)?.seconds>0).map(([sn,a])=>[a,results[1].devices.get(sn)]);
   console.log(JSON.stringify({matched_devices:matched.length,previous_seconds:stats(matched.map(([a])=>a.seconds)),current_seconds:stats(matched.map(([,b])=>b.seconds)),
     previous_api_seconds:stats(matched.map(([a])=>a.network)),current_api_seconds:stats(matched.map(([,b])=>b.network)),
-    previous_reused_days:sum(matched.map(([a])=>a.reused)),current_reused_days:sum(matched.map(([,b])=>b.reused))}));
+    previous_reused_days:sum(matched.map(([a])=>a.reused)),current_reused_days:sum(matched.map(([,b])=>b.reused)),
+    query_day_transition:matched.reduce((o,[a,b])=>{const k=`${a.days}_to_${b.days}`;o[k]=(o[k]||0)+1;return o;},{}),
+    previous_rows:sum(matched.map(([a])=>a.rows)),current_rows:sum(matched.map(([,b])=>b.rows))}));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(()=>{console.error('Private diagnostic aggregation failed; no raw diagnostics emitted.');process.exitCode=1;});
