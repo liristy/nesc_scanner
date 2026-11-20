@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { loadConfig } from '../src/config.mjs';
+import { mapConcurrent } from '../src/concurrency.mjs';
 import { shiftDay } from '../src/calendar.mjs';
 import { JYPlatform } from '../src/platform.mjs';
 import { batteryOnline, tableForm, tablePayload } from '../src/platform-http.mjs';
@@ -24,7 +25,7 @@ const output = path.join(config.projectRoot, 'run/speed-check/batch-investigatio
 const result = { prefix, model, day, checkedAt: new Date().toISOString(), inventory: [], alarms: [], details: {}, gaps: [] };
 const scalarFields = (row, pattern) => Object.fromEntries(Object.entries(row ?? {}).filter(([key, value]) =>
   pattern.test(key) && ['string', 'number', 'boolean'].includes(typeof value)));
-const collectTable = async ({ page, endpoint, filters, sort, identify, cap }) => {
+const collectTable = async ({ page, endpoint, filters, sort, identify, cap, inScope = () => true }) => {
   const stage = `${page}/${endpoint}`;
   const rows = [], seen = new Set();
   let total;
@@ -34,7 +35,8 @@ const collectTable = async ({ page, endpoint, filters, sort, identify, cap }) =>
         form: { ...tableForm(token, filters, sort, 50), page: String(pageNumber) }, referrer: page, format: 'json',
       }))));
     total ??= data.count;
-    if (total > cap) throw new Error(`${stage} 超过专项核查条数上限`);
+    if (!data.data.every(inScope)) throw new Error(`${stage} 返回范围以外的设备，总数 ${total}`);
+    if (total > cap) throw new Error(`${stage} 返回 ${total} 条，超过专项核查上限 ${cap}`);
     if (data.count !== total || data.data.length !== Math.min(50, total - rows.length)) {
       throw new Error(`${stage} 分页总条数或单页行数不一致`);
     }
@@ -53,7 +55,8 @@ try {
   await platform.ensureLogin();
   const inventory = await collectTable({ page: config.batteryInfoPath, endpoint: 'Source',
     filters: [prefix, '', '', '1', '1', '', '', '', '', '', '', ''].join(';'),
-    sort: 'DataTime', identify: row => String(row.BatteryBaseInfoId ?? ''), cap: 1500 });
+    sort: 'DataTime', identify: row => String(row.BatteryBaseInfoId ?? ''), cap: 6000,
+    inScope: row => typeof row.BatteryCode === 'string' && row.BatteryCode.startsWith(prefix) });
   if (!inventory.length || inventory.some(row => typeof row.BatteryCode !== 'string' ||
       !row.BatteryCode.startsWith(prefix) || !/^\d+$/.test(String(row.BatteryBaseInfoId ?? '')))) {
     throw new Error('未取得与专项前缀相符的设备清单');
@@ -64,7 +67,7 @@ try {
 
   const batches = new Map(inventory.map(row => [row.BatteryCode,row]));
   const rangeStart = shiftDay(day, -1);
-  for (const sns of chunk([...batches.keys()], 45)) {
+  await mapConcurrent(chunk([...batches.keys()], 45), 3, async sns => {
     try {
       const alarms = await collectTable({ page: config.alarmPath, endpoint: 'TableSource',
         filters: [`${rangeStart} ~ ${day}`, sns.join(','), '', '', '1,3,2', '', '', '0', '', ''].join(';'),
@@ -75,12 +78,13 @@ try {
     } catch (error) {
       result.gaps.push({ stage: 'alarms', message: error.message });
     }
-  }
+  });
   await atomicWriteJson(output, result);
 
   const numeric = value => typeof value === 'number' ? value : /^-?\d+(\.\d+)?$/.test(String(value).trim()) ? Number(value) : NaN;
   const suspected = (row, keys, predicate) => Object.entries(row).some(([key, value]) => keys.test(key) && predicate(numeric(value)));
   const samples = [...new Set([
+    ...inventory.filter(row => Array.isArray(request.examples) && request.examples.includes(row.BatteryCode)).slice(0, 3),
     ...inventory.filter(row => /保护/.test(String(row.DisplayStatus ?? ''))).slice(0, 4),
     ...inventory.filter(row => suspected(row, /^T?(?:Battery|Pack|Total)?Vol(?:t?age)?$/i, value => value >= 0 && value < 5)).slice(0, 4),
     ...inventory.filter(row => suspected(row, /^T?(?:Battery)?Current$/i, value => Math.abs(value) > 1000)).slice(0, 3),
