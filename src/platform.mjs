@@ -8,7 +8,7 @@ import { mapConcurrent } from './concurrency.mjs';
 import { collectHeartbeatHistory } from './heartbeat-history.mjs';
 import { beijingText, shiftDay } from './calendar.mjs';
 import { validVoltage } from './audit-rules.mjs';
-import { fault, parseReportPage, PlatformHttp, sessionExpired, tableForm, tablePayload, tokenName } from './platform-http.mjs';
+import { batteryOnline, fault, parseReportPage, PlatformHttp, sessionExpired, tableForm, tablePayload, tokenName } from './platform-http.mjs';
 
 const validSN = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value);
 const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && parsePlatformDateTime(value);
@@ -139,8 +139,7 @@ export class JYPlatform {
     const customers = new Set(customerFields.map(key => fields.get(key)));
     const softwareFields = ['BMS软件版本号', 'BMS软件版本', '软件版本号', '软件版本', 'BMS版本'].filter(key => fields.get(key));
     const softwareVersions = new Set(softwareFields.map(key => fields.get(key)));
-    const onlineFlag = page.battery.IsOnline;
-    const online = [1, '1', true].includes(onlineFlag) ? true : [0, '0', false].includes(onlineFlag) ? false : null;
+    const online = batteryOnline(page.battery.IsOnline);
     const detail = { sn, bms: fields.get('BMS编号') || '', model: fields.get('型号') || '',
       bmsSoftwareVersion: softwareVersions.size === 1 ? [...softwareVersions][0] : '',
       bmsSoftwareVersionSource: softwareVersions.size === 1 ? softwareFields.join('／') : '',

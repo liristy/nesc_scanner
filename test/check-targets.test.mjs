@@ -16,6 +16,7 @@ test('只读验收名单读取私有跟踪状态，去重限两台且不猜测BM
     {sn:'SN-C',time:'2026-10-22 11:00:00'},
   ]}));
   assert.deepEqual(await readOnlyCheckTargets(root),['SN-B','SN-C']);
+  assert.deepEqual(await readOnlyCheckTargets(root, '', { screenForOnline: true }),['SN-B','SN-C','SN-A']);
   await fs.writeFile(path.join(root,'state/current_tracking.json'),JSON.stringify({items:[{bms_number:'BMS-ONLY'}]}));
   await assert.rejects(readOnlyCheckTargets(root),/不能猜测/);
 });

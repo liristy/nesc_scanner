@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { JYPlatform } from '../src/platform.mjs';
+import { batteryOnline } from '../src/platform-http.mjs';
 import { createRunLogger } from '../src/progress.mjs';
 import { atomicWriteJson, parsePlatformDateTime, identityOf } from '../src/utils.mjs';
 import { downloadAlarmRows } from '../src/alarm-export.mjs';
@@ -11,7 +12,9 @@ import { readOnlyCheckTargets } from './check-targets.mjs';
 
 const targetRoot = process.env.JY_CHECK_STATE_DIR || process.env.JY_ALARM_DATA_DIR ||
   fileURLToPath(new URL('../../nesc_report/', import.meta.url));
-const sns=await readOnlyCheckTargets(targetRoot, process.env.JY_CHECK_SNS || '');
+const requireOnlineCells=process.env.JY_CHECK_ONLINE_CELLS==='true';
+const candidates=await readOnlyCheckTargets(targetRoot, process.env.JY_CHECK_SNS || '', {screenForOnline:requireOnlineCells});
+let sns=candidates;
 const reportDate=process.env.JY_CHECK_DATE || shiftDay(beijingText(new Date()).slice(0,10),-1);
 if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate) || !parsePlatformDateTime(reportDate))throw new Error('验收日期无效');
 const config=await loadConfig(),logger=createRunLogger(config.projectRoot);
@@ -21,6 +24,13 @@ try {
   const started=Date.now();
   const summary={reportDate,transport:'http'};
   try{
+    if(requireOnlineCells) {
+      logger.progress({stage:'筛选在线电芯验收样本'});
+      await p.ensureLogin();
+      const batteries=await p.readBatterySummaries(candidates);
+      sns=candidates.filter(sn=>batteryOnline(batteries.get(sn)?.IsOnline)===true).slice(0,1);
+      if(!sns.length)throw new Error('私有跟踪样本中未找到在线设备，实时电芯尚未验证');
+    }
     logger.progress({stage:'HTTP 小批次只读验收',completed:0,total:sns.length,succeeded:0,failed:0,pending:sns.length});
     const start=parsePlatformDateTime(reportDate),end=parsePlatformDateTime(shiftDay(reportDate,1));
     const alarm=await downloadAlarmRows(p,{startDate:reportDate,endDate:reportDate,reportDate},
@@ -32,11 +42,15 @@ try {
     summary.devices=sns.map(sn=>{
       const evidence=p.heartbeatEvidence.get(sn);
       return {sn,complete:evidence?.complete,rows:evidence?.records?.length,days:evidence?.historyDays?.length||1,
-        online:evidence?.detail?.online,cellsComplete:evidence?.detail?.cellsComplete,error:evidence?.error||evidence?.detail?.cellsError};
+        online:evidence?.detail?.online,cellsComplete:evidence?.detail?.cellsComplete,cells:evidence?.detail?.cells?.length,
+        error:evidence?.error||evidence?.detail?.cellsError};
     });
     summary.seconds=(Date.now()-started)/1000;
   }finally{await p.close();}
   await atomicWriteJson(path.join(config.projectRoot,'run/speed-check/summary.json'),summary);
+  if(requireOnlineCells && !summary.devices.some(device=>device.online===true && device.cellsComplete)) {
+    throw new Error('选中的在线设备未取得完整实时电芯');
+  }
   if(summary.devices.some(device=>!device.complete || !(device.rows>0) || (device.online!==false && !device.cellsComplete))) {
     throw new Error('只读验收存在心跳或电芯证据缺口');
   }

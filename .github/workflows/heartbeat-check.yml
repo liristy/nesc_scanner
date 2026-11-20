@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      online_cells:
+        description: '从私有跟踪名单选择在线设备，并要求完整读取实时电芯'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
   checks: write
@@ -74,6 +79,7 @@ jobs:
           JY_ALARM_PASSWORD: ${{ secrets.JY_ALARM_PASSWORD }}
           JY_CHECK_DATE: ${{ inputs.date }}
           JY_CHECK_HISTORY: ${{ inputs.full_history }}
+          JY_CHECK_ONLINE_CELLS: ${{ inputs.online_cells }}
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
         run: |

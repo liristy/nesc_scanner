@@ -62,6 +62,12 @@ export function tableForm(token, fastItems, sortField, limit) {
     ids: '', dataId: '0', page: '1', limit: String(limit) };
 }
 
+export function batteryOnline(flag) {
+  if ([1, '1', true].includes(flag)) return true;
+  if ([0, '0', false].includes(flag)) return false;
+  return null;
+}
+
 export class PlatformHttp {
   constructor(config) {
     this.config = config;
