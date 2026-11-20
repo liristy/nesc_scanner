@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../src/config.mjs';
 import { mapConcurrent } from '../src/concurrency.mjs';
@@ -25,14 +26,14 @@ const output = path.join(config.projectRoot, 'run/speed-check/batch-investigatio
 const result = { prefix, model, day, checkedAt: new Date().toISOString(), inventory: [], alarms: [], details: {}, gaps: [] };
 const scalarFields = (row, pattern) => Object.fromEntries(Object.entries(row ?? {}).filter(([key, value]) =>
   pattern.test(key) && ['string', 'number', 'boolean'].includes(typeof value)));
-const collectTable = async ({ page, endpoint, filters, sort, identify, cap, inScope = () => true }) => {
+const collectTable = async ({ page, endpoint, filters, sort, sortType = 'desc', identify, cap, inScope = () => true }) => {
   const stage = `${page}/${endpoint}`;
   const rows = [], seen = new Set();
   let total;
   for (let pageNumber = 1; pageNumber <= Math.ceil(cap / 50); pageNumber++) {
     const data = await platform.withSession(() => platform.http.withReportToken(page, async token =>
       tablePayload(await platform.http.read(`${page}/${endpoint}`, {
-        form: { ...tableForm(token, filters, sort, 50), page: String(pageNumber) }, referrer: page, format: 'json',
+        form: { ...tableForm(token, filters, sort, 50), sortType, page: String(pageNumber) }, referrer: page, format: 'json',
       }))));
     total ??= data.count;
     if (!data.data.every(inScope)) throw new Error(`${stage} 返回范围以外的设备，总数 ${total}`);
@@ -42,7 +43,7 @@ const collectTable = async ({ page, endpoint, filters, sort, identify, cap, inSc
     }
     for (const row of data.data) {
       const identity = identify(row);
-      if (!identity || seen.has(identity)) throw new Error(`${stage} 缺少唯一行标识或分页重复`);
+      if (!identity || seen.has(identity)) throw new Error(`${stage} 缺少唯一行标识或分页重复（第 ${pageNumber} 页，平台总数 ${total}）`);
       seen.add(identity);
       rows.push(row);
     }
@@ -53,10 +54,29 @@ const collectTable = async ({ page, endpoint, filters, sort, identify, cap, inSc
 
 try {
   await platform.ensureLogin();
-  const inventory = await collectTable({ page: config.batteryInfoPath, endpoint: 'Source',
-    filters: [prefix, '', '', '1', '1', '', '', '', '', '', '', ''].join(';'),
-    sort: 'DataTime', identify: row => String(row.BatteryBaseInfoId ?? ''), cap: 6000,
-    inScope: row => typeof row.BatteryCode === 'string' && row.BatteryCode.startsWith(prefix) });
+  const rangeStart = shiftDay(day, -1);
+  let inventory;
+  try {
+    inventory = await collectTable({ page: config.batteryInfoPath, endpoint: 'Source',
+      filters: [prefix, '', '', '1', '1', '', '', '', '', '', '', ''].join(';'),
+      sort: 'BatteryCode', sortType: 'asc', identify: row => String(row.BatteryBaseInfoId ?? ''), cap: 6000,
+      inScope: row => typeof row.BatteryCode === 'string' && row.BatteryCode.startsWith(prefix) });
+    result.inventoryScope = 'prefix-complete';
+  } catch (error) {
+    result.gaps.push({ stage: 'prefix-inventory', message: error.message });
+    const report = await fs.readFile(path.join(config.projectRoot, 'reports',
+      `${rangeStart.replaceAll('-', '')}-160000`, '电池报警复核清单.md'), 'utf8').catch(e => {
+      if (e.code === 'ENOENT') return '';
+      throw e;
+    });
+    const examples = Array.isArray(request.examples) ? request.examples.filter(sn =>
+      typeof sn === 'string' && /^[A-Za-z0-9_-]+$/.test(sn) && sn.startsWith(prefix)) : [];
+    const known = [...new Set([...examples, ...(report.match(/[A-Za-z0-9_-]{12,64}/g) ?? []).filter(sn => sn.startsWith(prefix))])].slice(0, 150);
+    const pages = await mapConcurrent(chunk(known, 45), 3, sns => platform.readBatterySummaries(sns));
+    inventory = pages.flatMap(rows => [...rows.values()]);
+    result.inventoryScope = 'historical-report-and-screenshot';
+    result.knownTargets = known.length;
+  }
   if (!inventory.length || inventory.some(row => typeof row.BatteryCode !== 'string' ||
       !row.BatteryCode.startsWith(prefix) || !/^\d+$/.test(String(row.BatteryBaseInfoId ?? '')))) {
     throw new Error('未取得与专项前缀相符的设备清单');
@@ -66,7 +86,6 @@ try {
   await atomicWriteJson(output, result);
 
   const batches = new Map(inventory.map(row => [row.BatteryCode,row]));
-  const rangeStart = shiftDay(day, -1);
   await mapConcurrent(chunk([...batches.keys()], 45), 3, async sns => {
     try {
       const alarms = await collectTable({ page: config.alarmPath, endpoint: 'TableSource',
