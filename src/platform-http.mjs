@@ -16,20 +16,23 @@ const attribute = (node, name) => node.attrs?.find(attr => attr.name === name)?.
 const hasClass = (node, name) => attribute(node, 'class')?.split(/\s+/).includes(name);
 const textOf = node => [...descendants(node)].filter(child => child.nodeName === '#text')
   .map(child => child.value).join('').trim();
+const validToken = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value);
+const scriptToken = /(?:"__RequestVerificationToken"|'__RequestVerificationToken'|\b__RequestVerificationToken\b)\s*[:=]\s*(["'])([A-Za-z0-9_-]+)\1/;
 
-export function parseReportPage(html, { detail = false } = {}) {
+export function parseReportPage(html, { detail = false, pageName = '平台页面' } = {}) {
   const nodes = [...descendants(parse(html))];
-  let token;
+  let formToken, inlineToken;
   const fields = new Map();
   let lastDataTime = null;
   for (const node of nodes) {
-    if (node.tagName === 'input' && attribute(node, 'name') === tokenName) {
-      token ??= attribute(node, 'value');
+    if (node.tagName === 'input' && [attribute(node, 'name'), attribute(node, 'id')].includes(tokenName)) {
+      const value = attribute(node, 'value');
+      if (validToken(value)) formToken ??= value;
+    }
+    if (node.tagName === 'script') {
+      inlineToken ??= scriptToken.exec(textOf(node))?.[2];
     }
     if (!detail) continue;
-    if (node.tagName === 'script') {
-      token ??= /["']__RequestVerificationToken["']\s*:\s*["']([A-Za-z0-9_-]+)["']/.exec(textOf(node))?.[1];
-    }
     if (hasClass(node, 'tdCell')) {
       const labels = [...descendants(node)];
       const label = labels.find(child => hasClass(child, 'tdLabel'));
@@ -42,7 +45,8 @@ export function parseReportPage(html, { detail = false } = {}) {
     }
     if (attribute(node, 'id') === 'DataTime') lastDataTime = textOf(node) || null;
   }
-  if (!token || !/^[A-Za-z0-9_-]+$/.test(token)) throw fault('平台页面未提供有效防伪令牌');
+  const token = detail ? inlineToken ?? formToken : formToken ?? inlineToken;
+  if (!token) throw fault(`${pageName}未提供有效防伪令牌`);
   return { token, fields, lastDataTime };
 }
 
@@ -141,7 +145,7 @@ export class PlatformHttp {
     const { username, password } = this.config.credentials ?? {};
     if (!username || !password) throw fault('当前环境没有可用的平台登录凭据', 'AUTH_REQUIRED');
     const loginPath = '/Login/Index';
-    const { token } = parseReportPage(await this.read(loginPath));
+    const { token } = parseReportPage(await this.read(loginPath), { pageName: '登录页' });
     const login = await this.read('/Login/doLogin', {
       form: { [tokenName]: token, UserName: username, PassWord: password, WXOpenId: '', LoginFlag: 'DEFAULT', Culture: 'zh-CN' },
       referrer: loginPath, format: 'json',
@@ -150,13 +154,15 @@ export class PlatformHttp {
     if (login?.ShowSlider !== false || login.Message !== null || login.Url !== '/Home/Index') {
       throw fault('平台未确认登录成功，请核对凭据', 'AUTH_REQUIRED');
     }
+    await this.read(login.Url, { referrer: loginPath });
   }
 
   async withReportToken(page, operation) {
     for (let attempt = 0; attempt < 2; attempt++) {
       let pending = this.tokens.get(page);
       if (!pending) {
-        pending = this.read(page).then(html => parseReportPage(html).token);
+        const pageName = page.endsWith('/BatteryAlarmRecord') ? '报警报表页' : '电池摘要报表页';
+        pending = this.read(page, { referrer: '/Home/Index' }).then(html => parseReportPage(html, { pageName }).token);
         this.tokens.set(page, pending);
       }
       let token;

@@ -68,7 +68,10 @@ async function fixture(t, options = {}) {
         assert.equal(new URL(request.headers.origin).host, request.headers.host);
       }
       switch (url.pathname) {
-        case alarm: return reply(hidden('alarm-token'));
+        case '/Home/Index': return reply('<title>Scanner fixture</title>');
+        case alarm:
+          assert.equal(new URL(request.headers.referer).pathname, '/Home/Index');
+          return reply(`<script>const defaults={__RequestVerificationToken: 'alarm-token'};</script>`);
         case `${alarm}/TableSource`:
           assert.equal(form.get(tokenName), 'alarm-token');
           assert.equal(form.get('fastItems'), alarmFilters);

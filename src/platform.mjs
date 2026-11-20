@@ -121,7 +121,7 @@ export class JYPlatform {
     const detailPath = `${batteryPath}/BatteryView?${new URLSearchParams({ a: batteryId })}`;
     const { fields, token, lastDataTime } = parseReportPage(
       await this.withSession(() => this.http.read(detailPath, { timeout: this.config.heartbeatDetailTimeoutMs ?? 45000 })),
-      { detail: true },
+      { detail: true, pageName: '设备详情页' },
     );
     if (fields.get('电池组编号') !== sn ||
         (battery.BMSID && fields.get('BMS编号') && fields.get('BMS编号') !== String(battery.BMSID).trim())) {
