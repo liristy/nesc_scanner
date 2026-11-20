@@ -16,6 +16,10 @@ on:
         required: false
         default: false
         type: boolean
+      private_query_id:
+        description: 'dev 专项只读核查使用的私有草稿 Release 编号'
+        required: false
+        type: string
 permissions:
   contents: read
   checks: write
@@ -82,16 +86,29 @@ jobs:
           JY_CHECK_ONLINE_CELLS: ${{ inputs.online_cells }}
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
+          JY_PRIVATE_QUERY_ID: ${{ inputs.private_query_id }}
         run: |
           mkdir -p run/private-logs
-          node ../scripts/verify-collector-speed.mjs > run/private-logs/check.log 2>&1
+          if [[ -z "$JY_PRIVATE_QUERY_ID" ]]; then
+            node ../scripts/verify-collector-speed.mjs > run/private-logs/check.log 2>&1
+          fi
+      - name: 专项只读核查
+        id: investigation
+        if: github.ref_name == 'dev' && inputs.private_query_id != ''
+        continue-on-error: true
+        env:
+          JY_ALARM_USERNAME: ${{ secrets.JY_ALARM_USERNAME }}
+          JY_ALARM_PASSWORD: ${{ secrets.JY_ALARM_PASSWORD }}
+          JY_PRIVATE_QUERY_ID: ${{ inputs.private_query_id }}
+          REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
+        run: node ../scripts/inspect-batch.mjs > run/private-logs/check.log 2>&1
       - name: 保存验收证据到私有仓库
         if: ${{ !cancelled() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
         env:
           REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
         run: node ../scripts/private-evidence.mjs smoke
       - name: 检查验收结果
-        if: steps.monitor.outcome == 'failure'
+        if: steps.monitor.outcome == 'failure' || steps.investigation.outcome == 'failure' || (inputs.private_query_id != '' && github.ref_name != 'dev')
         run: |
           echo '只读验收未通过，详情见私有仓库草稿Release。'
           exit 1
