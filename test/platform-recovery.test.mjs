@@ -88,25 +88,20 @@ test('日期或字段错误不重试；取消后不重新打开详情且恢复�
 });
 
 async function scenario(sns, collect, config = {}, options = {}) {
-  const calls = [], closed = [], pages = [], progress = [];
+  const calls = [], progress = [];
   const platform = new JYPlatform({ heartbeatConcurrency: 2, batteryBatchSize: 1, ...config }, { info() {}, warn() {}, progress:p=>progress.push(p) });
   platform.ensureLogin = async () => {};
-  platform.context = { newPage: async () => {
-    const id = pages.length + 1;
-    pages.push(id);
-    return { id, close: async () => { closed.push(id); } };
-  } };
   const original = JYPlatform.prototype.fetchBatterySnapshots;
   JYPlatform.prototype.fetchBatterySnapshots = async function(batch, options) {
     this.lastSnapshots = new Map(); this.heartbeatEvidence = new Map();
-    const call = { batch, options, page: this.rootPage.id };
+    const call = { batch, options, worker: this };
     calls.push(call);
     await collect.call(this, call, calls);
     return this.lastSnapshots;
   };
   try {
     const snapshots = await platform.fetchBatterySnapshotsConcurrent(sns, { evidenceSNs: sns, reportDate: '2026-09-24', ...options });
-    return { platform, snapshots, calls, closed, pages, progress };
+    return { platform, snapshots, calls, progress };
   } finally { JYPlatform.prototype.fetchBatterySnapshots = original; }
 }
 
@@ -139,20 +134,20 @@ test('设备小批次由空闲通道继续领取，慢批次不阻塞后续设�
   },{auditPolicy:'current_day_pending',batteryBatchSize:45,heartbeatBatchSize:2,heartbeatConcurrency:2});
   assert.deepEqual(result.calls.map(c=>c.batch),[['A','B'],['C','D'],['E','F'],['G','H']]);
   assert.equal(result.snapshots.size,8);assert.equal(result.platform.heartbeatEvidence.size,8);
-  assert.equal(result.closed.length,4);
+  assert.equal(new Set(result.calls.map(call=>call.worker)).size,4);
 });
 
 test('连续失败换页仅继续未读设备，失败设备不补查，不显示空补查阶段',async()=>{
-  // The scenario runs isolated worker pages without accessing the live platform.
+  // Isolated batch state without accessing the live platform.
   const r=await scenario(['A','B','C','D','E','F'],function({batch}){
-    this.pageResetRequested=batch.includes('A');
-    for(const sn of this.pageResetRequested?batch.slice(0,3):batch){
+    this.batchResetRequested=batch.includes('A');
+    for(const sn of this.batchResetRequested?batch.slice(0,3):batch){
       this.lastSnapshots.set(sn,{});
-      this.heartbeatEvidence.set(sn,{sn,complete:!this.pageResetRequested,records:[],error:this.pageResetRequested?'Timeout':undefined});
+      this.heartbeatEvidence.set(sn,{sn,complete:!this.batchResetRequested,records:[],error:this.batchResetRequested?'Timeout':undefined});
     }
   },{auditPolicy:'current_day_pending',heartbeatConcurrency:1,batteryBatchSize:6});
   assert.deepEqual(r.calls.map(c=>c.batch),[['A','B','C','D','E','F'],['D','E','F']]);
-  assert.equal(r.pages.length,2);assert.equal(r.closed.length,2);
+  assert.equal(new Set(r.calls.map(call=>call.worker)).size,2);
   assert.equal(r.platform.heartbeatEvidence.size,6);
   assert.ok(r.progress.every(p=>p.stage!=='并发补查'));
   assert.equal(r.progress.filter(p=>p.stage).at(-1).estimated_remaining_seconds,0);
@@ -170,8 +165,7 @@ test('失败SN使用新页面补查，已成功SN不重查；批次异常也不�
   assert.equal(result.calls.length, 4);
   assert.equal(result.calls.filter(c => c.batch[0] === 'A').length, 1);
   assert.equal(result.calls.filter(c => c.batch[0] === 'C').length, 1);
-  assert.equal(new Set(result.calls.map(c => c.page)).size, 4);
-  assert.equal(result.closed.length, result.pages.length);
+  assert.equal(new Set(result.calls.map(c => c.worker)).size, 4);
   assert.ok([...result.platform.heartbeatEvidence.values()].every(e => e.complete));
 });
 
@@ -201,7 +195,6 @@ test('系统性失败补查最多连续3次，保留成功SN并显式登记所�
   assert.equal(result.platform.heartbeatEvidence.get('OK').complete, true);
   for (const sn of sns.slice(1)) assert.equal(result.platform.heartbeatEvidence.get(sn).complete, false);
   assert.match(result.platform.acquisitionWarnings[0], /5 个SN/);
-  assert.equal(result.closed.length, result.pages.length);
 });
 
 test('取消不会转入补查，关闭全部已创建页面', async () => {
@@ -234,7 +227,6 @@ test('共享会话失效后不再重开详情或逐SN补查，保留已完成证
     assert.equal(result.platform.heartbeatEvidence.get(sn).complete,false);
     assert.match(result.platform.heartbeatEvidence.get(sn).error,/会话已失效/);
   }
-  assert.equal(result.closed.length,result.pages.length);
 });
 
 test('补读客户或电芯只更新详情，复用同截止完整心跳；不复用不完整历史',async()=>{

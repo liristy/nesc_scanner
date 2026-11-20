@@ -34,7 +34,9 @@ export async function downloadAlarmRows(platform, window, parseOptions, { bmsNum
       }
       return { allRowCount: parts.reduce((sum, part) => sum + part.allRowCount, 0), rows: parts.flatMap(part => part.rows) };
     }
-    const parsed = await parseAlarmWorkbook(exported.buffer, parseOptions);
+    const parsed = exported.confirmedEmpty === true && exported.resultCount === 0
+      ? { allRowCount: 0, rows: [] }
+      : await parseAlarmWorkbook(exported.buffer, parseOptions);
     if (parsed.allRowCount !== exported.resultCount) {
       const error=Object.assign(new Error(`报警导出条数与页面不一致（${range.startDate}～${range.endDate}）：页面${exported.resultCount}条，文件${parsed.allRowCount}条`), {code:'ALARM_COUNT_MISMATCH'});
       // The whole-date query and export are separate reads of live data.

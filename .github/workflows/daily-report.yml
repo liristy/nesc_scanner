@@ -83,7 +83,7 @@ jobs:
       - name: 每日采集及工作日报告区间检查
         id: gate
         run: node ../scripts/report-schedule-gate.mjs
-      - name: 安装Chromium并检查程序
+      - name: 检查采集程序
         if: steps.gate.outputs.should_run == 'true'
         working-directory: .
         env:
@@ -91,7 +91,6 @@ jobs:
           JY_ALARM_CONFIG: github-config.json
           JY_ALARM_DATA_DIR: ''
         run: |
-          npx --no-install playwright install --with-deps chromium
           npm run check
           npm test
           npm run test:table

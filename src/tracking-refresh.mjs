@@ -63,8 +63,8 @@ export async function refreshPreviousAlarms(platform, previousItems, currentRows
         active.delete(index);publish();
       }
   };
-  // Real platforms provide isolated pages; fixtures/legacy implementations
-  // retain sequential execution. Never run concurrent queries on one page.
+  // The HTTP adapter provides independent requests over one authenticated
+  // session. Adapters without a concurrency method run sequentially.
   try {
   if(platform.mapAlarmQueries)await platform.mapAlarmQueries(pending,read);
   else for(const task of pending)await read(platform,task);

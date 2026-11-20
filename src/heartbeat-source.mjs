@@ -5,29 +5,6 @@ const SOURCE_PATH = '/Reports/BatteryHeartbeat/Source';
 const DISPLAY_FIELDS = ['TCreateTime', 'TBatteryHeartbeatStatus', 'TBatteryStatus', 'TMinVoltage', 'TMaxVoltage', 'TDiffVoltage', 'TMaxTemperatureNo', 'TMosTemperature', 'TMOSStatus', 'TDataStatus'];
 const fault = (message, code = 'HEARTBEAT_SOURCE_INVALID') => Object.assign(new Error(message), { code });
 
-// Only replay a query issued by the verified device's own detail frame. Keep
-// platform filters/CSRF fields in memory, never serialize the request template.
-export async function captureHeartbeatQuery(frame, action, timeoutMs = 10000) {
-  const page = frame.page(), detail = new URL(frame.url());
-  const batteryId = detail.searchParams.get('a');
-  if (!batteryId || !detail.pathname.startsWith('/Reports/BatteryInfo/BatteryView')) throw fault('心跳详情缺少已核对的设备ID');
-  let observed;
-  const pending = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    if (request.frame() !== frame || url.origin !== detail.origin || url.pathname !== SOURCE_PATH) return false;
-    const form = new URLSearchParams(request.postData() ?? '');
-    observed = { idMatches: form.get('dataId') === batteryId, hasRange: form.has('fastItems') };
-    return request.method() === 'POST' && observed.idMatches && observed.hasRange;
-  }, { timeout: timeoutMs });
-  pending.catch(() => {});
-  try {
-    const [request] = await Promise.all([pending, action()]);
-    return { url: request.url(), detailUrl: frame.url(), batteryId, form: request.postData() };
-  } catch {
-    throw fault(observed ? '心跳请求参数与当前详情不匹配，不能读取其他设备替代' : '心跳查询请求未发出，需重新打开详情', 'HEARTBEAT_QUERY_NOT_SENT');
-  }
-}
-
 export function heartbeatForm(query, reportDate, pageNumber, pageSize) {
   const url = new URL(query.url), detail = new URL(query.detailUrl);
   if (url.origin !== detail.origin || url.pathname !== SOURCE_PATH || detail.searchParams.get('a') !== query.batteryId) throw fault('心跳查询目标与详情设备不一致');
@@ -87,6 +64,10 @@ export async function readHeartbeatSource(request, query, { sn, reportDate, endT
     try {
       const status = response.status();
       if (status === 401 || status >= 300 && status < 400) throw fault('并发采集会话已失效，保留进度后由主流程重新登录', 'SESSION_EXPIRED');
+      if (status === 400 && response.text && !(await response.text().catch(() => '读取失败')).trim()) {
+        throw fault('平台拒绝了防伪令牌', 'PLATFORM_TOKEN_REJECTED');
+      }
+      signal?.throwIfAborted();
       payload = await response.json().catch(() => { throw fault(`心跳接口返回非JSON：HTTP ${status}`); });
       validateHeartbeatPayload(payload, status);
     } finally { await response.dispose?.(); }

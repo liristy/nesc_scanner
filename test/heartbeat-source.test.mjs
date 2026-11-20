@@ -51,9 +51,9 @@ test('600条模拟同一数据，300条分页请求数由12降至2，证据一�
 
 test('同SN历史日复用已验证的查询模板，不再打开详情或读取电芯',async()=>{
   const p=new JYPlatform({heartbeatTransport:'source',maxHeartbeatPages:20},{info(){}});
-  p.context={request:api([{code:0,count:1,data:[row(1)]}])};p.heartbeatQueries=new Map([['SN',query]]);p.auditDetails=new Map([['SN',{bms:'F100',customer:'客户'}]]);
+  p.http=api([{code:0,count:1,data:[row(1)]}]);p.heartbeatQueries=new Map([['SN',query]]);p.auditDetails=new Map([['SN',{bms:'F100',customer:'客户'}]]);
   // No page is available: a repeated detail opening would fail this test.
-  const e=await p.fetchTodayHeartbeat('SN','2026-10-03','2026-10-03 16:00:00');assert.equal(e.complete,true);assert.equal(e.detail.bms,'F100');assert.equal(p.context.request.calls.length,1);
+  const e=await p.fetchTodayHeartbeat('SN','2026-10-03','2026-10-03 16:00:00');assert.equal(e.complete,true);assert.equal(e.detail.bms,'F100');assert.equal(p.http.calls.length,1);
 });
 
 test('仅截止后新增头部记录时，验证旧首行、去重覆盖及总数后完整读取固定截止',async()=>{

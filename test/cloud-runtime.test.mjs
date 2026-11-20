@@ -108,13 +108,12 @@ test('证据包只恢复原始证据和检查进度，不恢复会话或覆盖�
   assert.deepEqual(await fs.readdir(path.join(root, 'run/cloud-bundle/acquisition')), ['batch-report.json']);
   assert.deepEqual(await fs.readdir(path.join(root, 'run/cloud-bundle/tracking')), [filename]);
 });
-test('云端关闭浏览器不调用DPAPI或持久化Cookie', async () => {
-  let closed = 0;
-  const platform = new JYPlatform({ auditVersion: 2, runtime: 'github' }, { warn: () => assert.fail('不得尝试DPAPI') });
-  platform.context = { storageState: () => assert.fail('不得导出会话'), close: async () => closed++ };
-  platform.browser = { close: async () => closed++ };
+test('云端关闭 HTTP 会话时丢弃 Cookie', async () => {
+  const platform = new JYPlatform({ auditVersion: 2, runtime: 'github', baseUrl:'https://fixture.invalid' });
+  await platform.open();
+  assert.ok(platform.http.jar);
   await platform.close();
-  assert.equal(closed, 2);
+  assert.equal(platform.http, undefined);
 });
 test('新双报告有直接入口，未完整生成的后一期不掩盖前一期', async () => {
   const root = await fixture();

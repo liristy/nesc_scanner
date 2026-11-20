@@ -8,13 +8,19 @@
   },
   "scripts": {
     "monitor": "node src/main.mjs",
-    "check": "node --check src/main.mjs && node --check src/platform.mjs && node --check src/heartbeat-source.mjs && node --check src/evidence-store.mjs && node --check src/audit-runner.mjs && node --check src/progress-view.mjs && node --check src/github-progress.mjs && node --check scripts/github-progress.mjs && node --check scripts/progress-server.mjs && node --check src/heartbeat-history.mjs && node --check src/pending-verification.mjs && node --check scripts/private-evidence.mjs",
+    "verify:http": "node scripts/verify-collector-speed.mjs",
+    "check": "node --check src/main.mjs && node --check src/platform.mjs && node --check src/platform-http.mjs && node --check src/heartbeat-source.mjs && node --check src/evidence-store.mjs && node --check src/audit-runner.mjs && node --check src/progress-view.mjs && node --check src/github-progress.mjs && node --check scripts/github-progress.mjs && node --check scripts/progress-server.mjs && node --check src/heartbeat-history.mjs && node --check src/pending-verification.mjs && node --check scripts/private-evidence.mjs && node --check scripts/verify-collector-speed.mjs",
     "test": "node --test test/*.test.mjs",
-    "test:table": "node --test test/platform-table.browser.mjs test/heartbeat-source.browser.mjs test/progress.browser.mjs",
+    "test:table": "node --test test/platform-http.test.mjs test/heartbeat-source.test.mjs",
+    "test:progress-browser": "node --test test/progress.browser.mjs",
     "progress": "node scripts/progress-server.mjs"
   },
   "dependencies": {
     "jszip": "3.10.1",
+    "parse5": "7.3.0",
+    "tough-cookie": "6.0.0"
+  },
+  "devDependencies": {
     "playwright": "1.62.1"
   }
 }

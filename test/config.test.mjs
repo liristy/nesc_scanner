@@ -14,7 +14,7 @@ test('云端必须提供账号；不回退到内置凭据；账号成对读取',
     process.env.JY_ALARM_PASSWORD = 'test-password';
     const config = await loadConfig();
     assert.deepEqual(config.credentials, { username: 'test-user', password: 'test-password' });
-    assert.equal(config.headless, true);
+    assert.equal(config.heartbeatSourcePageSize, 300);
     assert.equal(config.windowMode, 'workday');
     assert.equal(config.runtime, 'github');
     assert.equal(config.windowCutoffTime, '16:00');

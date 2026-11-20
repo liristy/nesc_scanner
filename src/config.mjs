@@ -34,23 +34,19 @@ export async function loadConfig() {
     batteryInfoPath: "/Reports/BatteryInfo",
     timezone: "Asia/Shanghai",
     vendor: "JY",
-    headless: true,
     scheduleTime: AUDIT_CUTOFF_TIME,
     windowCutoffTime: AUDIT_CUTOFF_TIME,
     windowMode: "workday",
     auditPolicy: 'current_day_pending',
     historicalReviewMode: 'recovery_only',
-    largeResultThreshold: 2000,
     maxDownloadRows: 20000,
     batteryBatchSize: 45,
     heartbeatConcurrency: 3,
     heartbeatBatchSize: 9,
-    heartbeatTransport: 'source',
     heartbeatSourcePageSize: 300,
     heartbeatRequestTimeoutMs: 20000,
     heartbeatFirstPageTimeoutMs: 60000,
     heartbeatDetailTimeoutMs: 45000,
-    navigationTimeoutMs: 60000,
     queryTimeoutMs: 120000,
     ...LOW_VOLTAGE_RULE,
     maxSampleGapMinutes: 1440,
@@ -74,7 +70,6 @@ export async function loadConfig() {
   if (!["workday", "daily"].includes(config.windowMode)) throw new Error("windowMode 必须为 workday 或 daily");
   if (!['continuous', 'current_day_pending'].includes(config.auditPolicy)) throw new Error('auditPolicy 必须为 continuous 或 current_day_pending');
   if (!['full', 'recovery_only'].includes(config.historicalReviewMode)) throw new Error('historicalReviewMode 必须为 full 或 recovery_only');
-  if (!['source', 'rendered'].includes(config.heartbeatTransport)) throw new Error('heartbeatTransport 必须为 source 或 rendered');
   if(!Number.isInteger(config.maxHeartbeatRecords)||config.maxHeartbeatRecords<6000||config.maxHeartbeatRecords>120000)throw new Error('心跳单日采集上限必须为6000～120000的整数');
   if(typeof config.heartbeatStableCutoff!=='boolean')throw new Error('heartbeatStableCutoff 必须为布尔值');
   if (!Number.isInteger(config.heartbeatSourcePageSize) || config.heartbeatSourcePageSize < 1 || config.heartbeatSourcePageSize > 300) throw new Error('心跳接口每页条数应为1～300的整数');
@@ -99,7 +94,6 @@ export async function loadConfig() {
     data: path.join(dataRoot, "data"),
     state: path.join(dataRoot, "state", "current_tracking.json"),
     downloads: path.join(dataRoot, "downloads"),
-    profile: path.join(dataRoot, "private", "browser-profile"),
     lock: path.join(dataRoot, "run", "monitor.lock"),
     lastResult: path.join(dataRoot, "run", "last-result.json"),
   };

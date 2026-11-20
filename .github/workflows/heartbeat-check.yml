@@ -54,7 +54,6 @@ jobs:
         working-directory: .
         run: |
           npm ci --omit=dev
-          npx --no-install playwright install --with-deps chromium
       - name: 核验私有报告仓库
         env:
           REPORT_REPO_TOKEN: ${{ secrets.REPORT_REPO_TOKEN }}
@@ -72,8 +71,6 @@ jobs:
           JY_ALARM_PASSWORD: ${{ secrets.JY_ALARM_PASSWORD }}
           JY_CHECK_DATE: ${{ inputs.date }}
           JY_CHECK_HISTORY: ${{ inputs.full_history }}
-          JY_CHECK_SOURCE_ONLY: 'true'
-          JY_DIAGNOSTIC: '1'
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
         run: |

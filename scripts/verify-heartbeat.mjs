@@ -16,14 +16,6 @@ await withRunLock(path.join(config.projectRoot, "run", "monitor.lock"), async ()
   let platform;
   try {
     platform = await new JYPlatform(config, logger).open();
-    if (process.env.JY_DIAGNOSTIC === '1') {
-      const watch = page => {
-        page.on('pageerror', error => logger.warn(`页面脚本：${error.message}`));
-        page.on('response', response => { if (response.status() >= 400) logger.warn(`HTTP ${response.status()} ${new URL(response.url()).pathname}`); });
-      };
-      for (const page of platform.context.pages()) watch(page);
-      platform.context.on('page', watch);
-    }
     await platform.fetchBatterySnapshots(sns, { evidenceSNs: sns, reportDate, endText });
     const evidence = [...platform.heartbeatEvidence.values()];
     const result = { completed_at: formatLocalDateTime(new Date()), seconds: (Date.now() - started) / 1000,

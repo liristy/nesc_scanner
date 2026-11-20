@@ -30,12 +30,13 @@ JY 电池报警采集程序与 GitHub Actions。报告、客户与设备数据�
 npm ci
 npm run check
 npm test
-npx playwright install chromium
 npm run test:table
 python -m unittest discover -s deploy/server-trigger -p 'test_*.py'
 ```
 
-现场验收使用 Actions 的“心跳采集小批次验收”，从私有库已有跟踪状态中按报警时间从新到旧选取最多两台具有明确SN的设备，要求读取非空且完整的心跳记录，只读查询，不发布报告或推进截止。设备名单只在私有检出目录和进程内存中使用，不保存到公开库的Secret、变量或输入；详细结果保存在私有报告库的草稿 Release 中。
+采集使用 Node.js 的 HTTPS 客户端和会话 Cookie，直接读取报警 XLSX、电池摘要、基本信息、电芯和分页心跳。`npm ci --omit=dev` 即可安装日常采集及只读验收所需依赖。进度网页的独立 UI 测试使用 `npx playwright install chromium` 和 `npm run test:progress-browser`。
+
+现场使用 Actions 的“心跳采集小批次验收”或在本地配置 `JY_ALARM_USERNAME` 和 `JY_ALARM_PASSWORD` 后运行 `npm run verify:http`。本地默认读取相邻私有库跟踪状态，按报警时间选取最多两台设备，查询北京时间昨天。可用 `JY_CHECK_DATE` 指定日期，有明确样本时通过本地 `JY_CHECK_SNS` 提供最多五台设备。验收只做只读查询，核对报警导出、非空完整心跳以及在线设备电芯。Actions 的详细结果保存在私有报告库的草稿 Release 中。
 
 报告库专用访问令牌仅授权 `nesc_report`，按所有者要求设为永久有效。
 
