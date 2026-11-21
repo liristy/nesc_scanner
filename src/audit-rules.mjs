@@ -8,7 +8,8 @@ export function bmsSoftwareVersion(alarm) {
   return alarm.detail?.bmsSoftwareVersion || alarm.bmsSoftwareVersion || alarm.row?.['BMS版本'] || '';
 }
 
-export const IGNORED_ALARMS = new Set(['物联网模块已解绑','物联网卡号变更','BMS编号异常']);
+export const BMS_NUMBER_WARNING = 'BMS编号异常';
+export const IGNORED_ALARMS = new Set(['物联网模块已解绑','物联网卡号变更']);
 export const alarmKey = a => `${a.sn}\0${a.type}`;
 export function normalizeAlarm(row) {
   return {sn:row.sn ?? row.bms_number ?? row['电池组编号'], type:row.type ?? row.alarm_type ?? String(row['报警（级别：类型）'] ?? '').replace(/^保护\s*[:：]\s*/,''),
@@ -57,7 +58,15 @@ export function validVoltage(record) {
 }
 export function analyzeWeek(evidence, endText) {
   const records = (evidence?.records ?? []).filter(r=>r.time <= endText && Number.isFinite(chinaDate(r.time).getTime())).sort((a,b)=>a.time.localeCompare(b.time));
-  const samples = records.filter(r=>validVoltage(r) !== null);
+  const samples = [];
+  let latestInvalidVoltageTime = null;
+  for (const record of records) {
+    if (validVoltage(record) !== null) samples.push(record);
+    else if (record.abnormal || /异常数据/.test(`${record.event} ${record.dataStatus ?? ''}`) ||
+      String(record.minVoltage ?? '').trim() || String(record.maxVoltage ?? '').trim()) {
+      latestInvalidVoltageTime = record.time;
+    }
+  }
   const latest = samples.at(-1), minVoltage = latest ? validVoltage(latest) : null;
   const latestValues = new Set(samples.filter(r=>r.time===latest?.time).map(validVoltage));
   const alarms = records.filter(r=>/^保护\s*[:：]\s*电量不足$/.test(r.event) && !r.abnormal && !/异常数据/.test(r.dataStatus ?? ''));
@@ -87,7 +96,7 @@ export function analyzeWeek(evidence, endText) {
   if (start && samples.some(r=>r.time>=start && validVoltage(r)>=2.8)) gaps.push('证据段内最低电压曾回升至2.8V或以上');
   const confirmed = !gaps.length;
   return {confirmed,status:confirmed?'已确认需补电':minVoltage!==null && minVoltage<LOW_VOLTAGE_RULE.lowVoltageThresholdV?'低压优先复核':minVoltage!==null && minVoltage<2.8 && sleep.length?'低压保电观察':'证据待复核',
-    minVoltage,latestTime:latest?.time ?? null,minimumVoltage:samples.length?samples.reduce((min,r)=>Math.min(min,validVoltage(r)),Infinity):null,
+    minVoltage,latestTime:latest?.time ?? null,latestInvalidVoltageTime,minimumVoltage:samples.length?samples.reduce((min,r)=>Math.min(min,validVoltage(r)),Infinity):null,
     spanHours,start,end,lowPowerEvents:sleep.map(r=>({time:r.time,event:r.event})),gaps,notification:'待通知',
     coverage:{from:records[0]?.time,to:records.at(-1)?.time}, abnormalCount:records.filter(r=>r.abnormal || /异常数据/.test(r.event)).length};
 }

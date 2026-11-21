@@ -37,10 +37,13 @@ test('法定休息日、周末补班、固定北京时间截止及失败连续�
   assert.equal(buildAuditWindow(new Date('2026-09-28T08:00:00Z'),{last_success_cutoff:'2026-09-18 16:00:00'}).startText,'2026-09-18 16:00:00');
   assert.throws(()=>isChinaWorkday('2027-01-04'),/日历未配置/);
 });
-test('JY及保护优先过滤、忽略三项、同电池同类型取最新、恢复复查不扩大截止',()=>{
+test('JY及保护优先过滤、编号异常保留、同电池同类型取最新、恢复复查不扩大截止',()=>{
   const rows=[row(),row('SN-A','电量不足','2026-09-28 15:00:00'),row('SN-A','短路'),row('SN-B','电量不足',undefined,{'BMS厂商':'OTHER'}),row('SN-C','电量不足',undefined,{'报警（级别：类型）':'提示:电量不足'}),...['物联网模块已解绑','物联网卡号变更','BMS编号异常'].map(t=>row('SN-D',t)),row('boundary','电量不足',window.startText),row('end','短路',window.endText),row('future','短路','2026-09-28 16:00:01')];
   const result=collectAlarms(rows,[],[row('SN-A','短路',undefined,{'修复时间':'2026-09-28 16:00:00'}),row('new-after','短路','2026-09-28 17:00:00')],window,'2026-09-28 18:00:00');
-  assert.deepEqual(result.alarms.map(a=>[a.sn,a.time]),[['SN-A','2026-09-28 15:00:00'],['end',window.endText]]);assert.equal(result.recovered.length,1);
+  assert.deepEqual(result.alarms.map(a=>[a.sn,a.type,a.time]),[
+    ['SN-A','电量不足','2026-09-28 15:00:00'],['SN-D','BMS编号异常','2026-09-28 12:00:00'],['end','短路',window.endText],
+  ]);
+  assert.equal(result.recovered.length,1);
 });
 test('压差边界含等号，使用真实BMS体系，资料不足不能判正常',()=>{
   assert.equal(classifyDifference(detail).status,'保留');

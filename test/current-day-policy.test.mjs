@@ -103,10 +103,89 @@ test('历史报警已恢复后仅保留独立低压风险，正常电量不足�
   }
   const progress=[];
   await runAudit(config,{...logger,progress:p=>progress.push(p)},{now:new Date('2026-09-28T16:35:00+08:00'),Platform,retryOptions:{delays:[]}});
-  assert.deepEqual(queried,[]);
+  assert.deepEqual(queried,['low']);
   const state=await readJson(config.paths.state);
   assert.deepEqual(state.items.map(a=>a.sn),['low']);assert.equal(state.items[0].followupOnly,true);
-  assert.deepEqual(progress.find(p=>p.collection_scope).collection_scope,{current_window:0,history_only:0,total:0,skipped_recovered_normal:1,history_recovery_only:1,tracked_total:1});
+  assert.deepEqual(progress.find(p=>p.collection_scope).collection_scope,{current_window:0,history_only:1,total:1,skipped_recovered_normal:1,history_recovery_only:0,tracked_total:1});
+});
+
+for (const recoveryDuringRead of [false,true])
+test(`报警恢复后验证电压并跨日跟踪，恢复复查首次发现=${recoveryDuringRead}`,async t=>{
+  const config=await fixture(t);
+  const sn='RECOVERED-LOW', repair='2026-09-28 14:00:00';
+  const repaired={...row(sn,'单体异常低压故障'),'修复时间':repair};
+  const reads=[];
+  let day='2026-09-28';
+  class Platform {
+    async open(){} async close(){}
+    async queryAlarmAndDownload(query,{bmsNumbers}) {
+      const rows=bmsNumbers.includes(sn)?[repaired]
+        : !bmsNumbers.length && day==='2026-09-28'?[recoveryDuringRead?row(sn,'单体异常低压故障'):repaired]:[];
+      return {buffer:await workbook(rows),resultCount:rows.length};
+    }
+    async fetchBatterySnapshots(sns) {
+      reads.push(...sns);
+      const records=[{time:day+' 15:00:00',minVoltage:day==='2026-09-28'?2.79:2.8,maxVoltage:3.4}];
+      if(day==='2026-09-29')records.push({time:day+' 15:10:00',minVoltage:3.4,maxVoltage:3.5,abnormal:true});
+      this.heartbeatEvidence=new Map(sns.map(sn=>[sn,{complete:true,records,detail}]));
+      return new Map(sns.map(sn=>[sn,{detail}]));
+    }
+  }
+  const run=async()=>{
+    const now=new Date(day+'T16:35:00+08:00');
+    return runAudit(config,logger,{now,clock:()=>now,Platform,retryOptions:{delays:[]}});
+  };
+  await run();
+  let state=await readJson(config.paths.state);
+  assert.equal(state.items[0].repair,repair);
+  assert.equal(state.items[0].lowVoltage.minVoltage,2.79);
+  assert.equal(state.items[0].recoveredVoltageFollowup,true);
+  assert.equal(state.items[0].lowVoltage.confirmed,false);
+  let report=await fs.readFile(path.join(config.paths.reports,'电池报警复核清单.md'),'utf8');
+  assert.match(report,/报警已恢复的电压跟踪[\s\S]*RECOVERED-LOW/);
+  assert.doesNotMatch(report.split('## 已恢复剔除')[1],/RECOVERED-LOW/);
+  day='2026-09-29';
+  await run();
+  state=await readJson(config.paths.state);
+  assert.equal(state.items[0].review.status,'待确认');
+  assert.equal(state.items[0].lastLowVoltage.voltage,2.79);
+  day='2026-09-30';
+  await run();
+  state=await readJson(config.paths.state);
+  assert.deepEqual(state.items,[]);
+  assert.deepEqual(reads,[sn,sn,sn]);
+});
+
+test('BMS编号异常独立预警覆盖本区间内的短暂恢复与未恢复对象',async t=>{
+  const config=await fixture(t);
+  const type='BMS编号异常';
+  const rows=[row('BMS-OPEN',type),row('BMS-OPEN',type,'2026-09-28 13:30:00'),
+    {...row('BMS-REPAIRED',type),'修复时间':'2026-09-28 13:00:00'},row('ordinary','短路')];
+  class Platform {
+    async open(){} async close(){}
+    async queryAlarmAndDownload(query,{bmsNumbers}) {
+      const selected=bmsNumbers.length?rows.filter(a=>bmsNumbers.includes(a['电池组编号'])):rows;
+      return {buffer:await workbook(selected),resultCount:selected.length};
+    }
+    async fetchBatterySnapshots(sns) {
+      this.heartbeatEvidence=new Map(sns.map(sn=>[sn,{complete:true,records:[
+        {time:'2026-09-28 15:00:00',minVoltage:3.4,maxVoltage:3.5}],detail}]));
+      return new Map(sns.map(sn=>[sn,{detail}]));
+    }
+  }
+  const now=new Date('2026-09-28T16:35:00+08:00');
+  const result=await runAudit(config,logger,{now,clock:()=>now,Platform,retryOptions:{delays:[]}});
+  const raw=await readJson(path.join(config.paths.data,'2026-09-28_alarm_data.json'));
+  const state=await readJson(config.paths.state);
+  assert.equal(result.bms_number_warning_count,2);
+  assert.equal(raw.record_count,1);
+  assert.deepEqual(raw.audit.counts.map(c=>c.type),['短路']);
+  assert.deepEqual(raw.audit.trends.map(c=>c.type),['短路']);
+  assert.deepEqual(raw.audit.bms_number_warnings.map(a=>[a.sn,a.repair]),[
+    ['BMS-REPAIRED','2026-09-28 13:00:00'],['BMS-OPEN',null],
+  ]);
+  assert.deepEqual(state.items.map(a=>a.sn),['BMS-OPEN','ordinary']);
+  assert.match(await fs.readFile(path.join(config.paths.reports,'今日电池报警简报.md'),'utf8'),/BMS编号异常预警[\s\S]*涉及2块，1块未确认恢复，1块已记录恢复/);
 });
 
 for(const failure of ['cells','heartbeat','summary','empty_voltage','recovery','bms','timeout'])test(`读取失败直接待确认，不重试、不确认风险、不充当趋势基线：${failure}`,async t=>{

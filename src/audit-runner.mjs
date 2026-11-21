@@ -14,7 +14,7 @@ import { buildAuditReports, buildTrends, reportHtml } from './audit-report.mjs';
 import { generateAutomaticReports } from './custom-report.mjs';
 import { checkpointName, checkpointPath, evidenceSummary, hydrateEvidence } from './evidence-store.mjs';
 import { currentDayPending, currentDayWindow, auditWindowNow } from './audit-policy.mjs';
-import { buildAcquisitionPlan } from './acquisition-plan.mjs';
+import { buildAcquisitionPlan, hasFreshVoltageAfterRecovery, recoveredVoltageCandidates } from './acquisition-plan.mjs';
 import { carryHistoricalAlarm } from './historical-review.mjs';
 
 export const evidenceName=sn=>createHash('sha256').update(sn).digest('hex')+'.json';
@@ -72,13 +72,14 @@ export async function saveAuditOutputs(config,{window,alarms,recovered,warnings,
   const pendingReviews=alarms.filter(a=>a.review).map(a=>({sn:a.sn,type:a.type,...a.review}));
   const focusItems=alarms.map(a=>({sn:a.sn,category:a.type,count:1,types:[a.type],latestAlarm:a.time,row:a.row ?? {},snapshot:snapshots.get(a.sn),
     collection:a.historicalReview?'仅恢复复查，未重读心跳':evidence.get(a.sn)?.complete?'心跳范围读取完整':'证据读取不完整',
-    crossCheck:{status:a.review?.kind==='reading_pending'?(a.review.status || '待确认'):a.excluded?'压差排除待复核':'未恢复保护，继续跟踪',warnings:[...(a.lowVoltage?.gaps ?? []),...(a.review?[a.review.reason]:[])]},
+    crossCheck:{status:a.review?.kind==='reading_pending'?(a.review.status || '待确认'):a.followupOnly?'报警已恢复，风险继续复核':a.excluded?'压差排除待复核':'未恢复保护，继续跟踪',warnings:[...(a.lowVoltage?.gaps ?? []),...(a.review?[a.review.reason]:[])]},
     lowVoltage:a.lowVoltage?{...a.lowVoltage,reason:a.lowVoltage.gaps.join('；') || '满足连续三天补电条件',sampledMinutes:a.lowVoltage.spanHours*60,sleepEvidence:a.lowVoltage.lowPowerEvents.map(e=>e.time).join('、')}:null}));
   const focus={items:focusItems,summary:report.counts.map(c=>({category:c.type,recordCount:c.count,snCount:new Set(report.kept.filter(a=>a.type===c.type).map(a=>a.sn)).size})),
     uniqueSNCount:new Set(alarms.map(a=>a.sn)).size,evidenceSNCount:[...new Set(alarms.map(a=>a.sn))].filter(sn=>evidence.get(sn)?.complete&&!evidence.get(sn)?.carried).length,overlap:[...new Set(alarms.filter(a=>a.type==='单体压差过大' && alarms.some(b=>b.sn===a.sn && b.type==='电量不足')).map(a=>a.sn))],analysisSettings:{auditVersion:2,...LOW_VOLTAGE_RULE}};
   const raw={audit_version:2,generated_at:checkedAt,period,record_count:report.kept.length,records:toRawData(report.kept.map(a=>a.row ?? {'电池组编号':a.sn,'最早报警时间':a.time,'报警（级别：类型）':`保护:${a.type}`,'BMS厂商':'JY'})).map((record,i)=>({...record,bms_software_version:bmsSoftwareVersion(report.kept[i]) || null})),
     today_focus:{...focus,items:focus.items.map(i=>({...i,snapshot:i.snapshot?{heartbeatTime:i.snapshot.heartbeatTime,batteryStatus:i.snapshot.batteryStatus}:null}))},today_heartbeat_evidence:Object.fromEntries([...evidence].map(([sn,e])=>[sn,{complete:e.complete&&!e.carried,carried:e.carried===true,coverageCutoff:e.coverageCutoff,error:e.error,historyComplete:e.historyComplete,historyDays:e.historyDays,recordCount:e.recordCount ?? e.records?.length ?? 0}])),analysis_settings:focus.analysisSettings,
-    audit:{items,confirmed:report.confirmed,counts:report.counts,complete,evidence_complete:pendingReviews.length===0 && !warnings.length && !alarms.some(a=>a.historicalReview),warnings,pending_reviews:pendingReviews,trends:trends.groups},acquisition_finished_at:checkedAt};
+    audit:{items,confirmed:report.confirmed,counts:report.counts,bms_number_warnings:report.bmsWarnings.map(a=>({sn:a.sn,time:a.time,repair:a.repaired?a.repair:null,origin:a.origin})),
+      complete,evidence_complete:pendingReviews.length===0 && !warnings.length && !alarms.some(a=>a.historicalReview),warnings,pending_reviews:pendingReviews,trends:trends.groups},acquisition_finished_at:checkedAt};
   // Required outputs all precede the success watermark. Any failure leaves the
   // pending interval and its acquisition checkpoints available for resumption.
   beforeCommit();
@@ -105,7 +106,8 @@ export async function saveAuditOutputs(config,{window,alarms,recovered,warnings,
     report_path:path.join(config.paths.reports,`${window.reportDate}_JY报警监测日报.md`),daily_report_path:path.join(config.paths.reports,'今日电池报警简报.html'),
     engineer_report_path:path.join(config.paths.reports,'电池报警复核清单.html'),custom_reports:custom.outputs,custom_report_errors:custom.errors}
     :{status:complete?'success':'partial_success',mode:'collection',completed_at:checkedAt,report_date:null,collection_date:window.reportDate,period,
-      message:complete?`每日采集与统计已完成，${sns.length}块电池，${report.reviewCount}块${currentDayPending(config)?'待确认':'电芯待复核'}；正式报告仍按法定工作日生成。`:'每日采集未完成。',pending_review_count:report.reviewCount,counts:report.counts};
+      message:complete?`每日采集与统计已完成，${sns.length}块电池，${report.reviewCount}块${currentDayPending(config)?'待确认':'电芯待复核'}。${report.bmsWarnings.length?`BMS编号异常预警${report.bmsWarnings.length}块。`:''}正式报告仍按法定工作日生成。`:'每日采集未完成。',pending_review_count:report.reviewCount,counts:report.counts};
+  result.bms_number_warning_count=report.bmsWarnings.length;
   await atomicWrite(path.join(config.paths.reports,'运行状态.html'),reportHtml(`# ${publishReport?(complete?report.completionText:'核查未完成'):'每日采集状态'}\n\n${result.message}\n\n${checkedAt}\n\n${warnings.join('\n')}`));
   await atomicWriteJson(config.paths.lastResult,result);
   if(complete) {
@@ -237,9 +239,11 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
       const checkedAt=beijingText(clock());
       selection=collectAlarms(parsed.rows,previousState.items ?? [],refresh.rows,window,checkedAt);
       const warnings=pendingPolicy?[]:[...refresh.errors,...(platform.acquisitionWarnings ?? [])];
+      const priorCutoff=reviewState.last_success_cutoff || window.startText;
+      const recoveredChecks=pendingPolicy?recoveredVoltageCandidates(selection,previousByKey,window,priorCutoff):[];
       const refreshedIdentities=new Set(refresh.rows.map(normalizeAlarm).map(a=>`${alarmKey(a)}\0${a.time}`));
       const recoveryGaps=new Map();
-      for(const a of [...selection.alarms,...previousRisks])if(!refreshedIdentities.has(`${alarmKey(a)}\0${a.time}`)) {
+      for(const a of [...selection.alarms,...previousRisks,...recoveredChecks])if(!refreshedIdentities.has(`${alarmKey(a)}\0${a.time}`)) {
         const reason=`${a.sn}／${a.type}原始报警未在恢复复查中找到，不能视为恢复${refresh.errors.length?'；'+refresh.errors.join('；'):''}`;
         if(pendingPolicy)recoveryGaps.set(`${alarmKey(a)}\0${a.time}`,reason);else warnings.push(reason);
       }
@@ -247,15 +251,20 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
       if(pendingPolicy && refresh.errors.length && !recoveryGaps.size)warnings.push(...refresh.errors);
       if(selection.legacyMissing.length)warnings.push(`历史对象缺少JY厂商证据，需复核：${[...new Set(selection.legacyMissing)].join('、')}`);
       const active=new Set(selection.alarms.map(alarmKey));
-      const followups=previousRisks.filter(a=>!active.has(alarmKey(a))).map(a=>({...a,followupOnly:true,origin:'历史延续'}));
+      const followups=new Map(previousRisks.filter(a=>!active.has(alarmKey(a))).map(a=>[alarmKey(a),{...a,followupOnly:true,origin:'历史延续'}]));
+      for(const a of recoveredChecks)followups.set(alarmKey(a),{...a,followupOnly:true,recoveredVoltageFollowup:true,
+        origin:a.time>window.startText?'本区间新增':'历史延续'});
       const lowBySN=new Map(sns.map(sn=>[sn,evidence.get(sn)?.week ?? analyzeWeek(evidence.get(sn),window.endText)]));
-      const alarms=[...selection.alarms,...followups].map(a=>{
-        if(historicalSet.has(a.sn))return {...carryHistoricalAlarm(a,previousByKey.get(alarmKey(a)),evidence.get(a.sn),snapshots.get(a.sn),checkedAt,
+      const alarms=[...selection.alarms,...followups.values()].map(a=>{
+        const previous=previousByKey.get(alarmKey(a));
+        if(historicalSet.has(a.sn) && !a.recoveredVoltageFollowup)return {...carryHistoricalAlarm(a,previous,evidence.get(a.sn),snapshots.get(a.sn),checkedAt,
           recoveryGaps.get(`${alarmKey(a)}\0${a.time}`),reviewState.last_success_cutoff),evidenceIndex:`跟踪数据/${evidenceName(a.sn)}`};
         const e=evidence.get(a.sn),detail=e?.detail ?? snapshots.get(a.sn)?.detail;
         if(!pendingPolicy && !e?.complete)warnings.push(`${a.sn}心跳读取未完成：${e?.error || '缺失'}`);
         if(!pendingPolicy && !detail)warnings.push(`${a.sn}基本信息未取得`);
-        const difference=a.type==='单体压差过大'?classifyDifference(pendingPolicy && !detail?.cellsComplete?{...detail,cells:[]}:detail):null;
+        const checkDifference=a.type==='单体压差过大' && (!a.recoveredVoltageFollowup ||
+          ['排除待复核','待复核'].includes(previous?.difference?.status));
+        const difference=checkDifference?classifyDifference(pendingPolicy && !detail?.cellsComplete?{...detail,cells:[]}:detail):null;
         let review;
         if(difference && !detail?.cellsComplete) {
           const warning=`${a.sn}压差电芯核查未完成：${detail?.cellsError || '逐节电压证据不完整'}`;
@@ -273,12 +282,24 @@ export async function runAudit(config,logger,{now=new Date(),clock=()=>new Date(
         const observedLow=lowBySN.get(a.sn);
         if(pendingPolicy && observedLow?.minVoltage===null)review={...review,kind:'reading_pending',status:'待确认',
           reason:[review?.reason,'有效电压证据缺失或异常，不能判正常'].filter(Boolean).join('；')};
+        let lastLowVoltage;
+        if(a.recoveredVoltageFollowup) {
+          const fresh=hasFreshVoltageAfterRecovery(a,e,observedLow,window.endText);
+          if(fresh && observedLow.minVoltage>=2.8 && !review && (!difference || difference.status==='保留'))return null;
+          if(!fresh)review={...review,kind:'reading_pending',status:'待确认',
+            reason:[review?.reason,'报警已恢复，尚未取得恢复后新鲜、完整且有效的单体电压'].filter(Boolean).join('；')};
+          const known=observedLow?.minVoltage!=null ? observedLow : previous?.lowVoltage;
+          lastLowVoltage=Number.isFinite(known?.minVoltage) && known.minVoltage>0 && known.minVoltage<2.8 &&
+            known.latestTime && known.latestTime<=window.endText &&
+            !known.gaps?.includes('有效最低电压缺失或同刻读数冲突')
+            ? {voltage:known.minVoltage,time:known.latestTime} : previous?.lastLowVoltage;
+        }
         if(review?.kind==='reading_pending' && isDeviceTimeout(review.reason))review={...review,status:'待验证',timeout:true};
         let lowVoltage=a.type==='电量不足' || observedLow?.minVoltage===null || observedLow?.minVoltage<2.8?observedLow:null;
         if(pendingPolicy && review && lowVoltage?.confirmed)lowVoltage={...lowVoltage,confirmed:false,status:review.status || '待确认',gaps:[...lowVoltage.gaps,review.reason]};
-        return {...a,detail,difference,review,excluded:difference?.status==='排除待复核',lowVoltage,evidenceIndex:`跟踪数据/${evidenceName(a.sn)}`,
+        return {...a,detail,difference,review,excluded:difference?.status==='排除待复核',lowVoltage,lastLowVoltage,evidenceIndex:`跟踪数据/${evidenceName(a.sn)}`,
           evidenceSummary:`读取${e?.recordCount ?? e?.records?.length ?? 0}条；历史日期${e?.historyDays?.join('、') || window.reportDate}；异常数据${e?.abnormalCount ?? e?.records?.filter(r=>r.abnormal).length ?? 0}条`};
-      }).filter(a=>!a.followupOnly || a.review || a.difference && a.difference.status!=='保留' || a.lowVoltage && (!evidence.get(a.sn)?.complete || a.lowVoltage.historicalConfirmed || a.lowVoltage.minVoltage===null || a.lowVoltage.minVoltage<2.8));
+      }).filter(a=>a && (!a.followupOnly || a.recoveredVoltageFollowup || a.review || a.difference && a.difference.status!=='保留' || a.lowVoltage && (!evidence.get(a.sn)?.complete || a.lowVoltage.historicalConfirmed || a.lowVoltage.minVoltage===null || a.lowVoltage.minVoltage<2.8)));
       const complete=!warnings.length;
       config.signal?.throwIfAborted();
       const refreshedRows=new Map(refresh.rows.map(r=>[`${r['电池组编号']}\0${r['报警（级别：类型）']}\0${r['最早报警时间']}`,r]));
