@@ -3,8 +3,9 @@ import path from "node:path";
 
 export const pad2 = (value) => String(value).padStart(2, "0");
 
+const localDateTimeFormatter = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
 export function formatLocalDateTime(date) {
-  return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(date);
+  return localDateTimeFormatter.format(date);
 }
 
 export function parsePlatformDateTime(value) {

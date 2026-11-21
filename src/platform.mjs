@@ -8,6 +8,7 @@ import { mapConcurrent } from './concurrency.mjs';
 import { collectHeartbeatHistory } from './heartbeat-history.mjs';
 import { beijingText, shiftDay } from './calendar.mjs';
 import { validVoltage } from './audit-rules.mjs';
+import { readAlarmPages } from './alarm-pages.mjs';
 import { batteryOnline, fault, parseReportPage, PlatformHttp, sessionExpired, tableForm, tablePayload, tokenName } from './platform-http.mjs';
 
 const validSN = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value);
@@ -63,29 +64,47 @@ export class JYPlatform {
       (task, index) => this.withSession(() => read(this, task, index)), { signal: this.config.signal });
   }
 
-  async queryAlarmAndDownload({ startDate, endDate }, { bmsNumbers = [] } = {}) {
+  alarmQuery({ startDate, endDate }, bmsNumbers) {
     if (!validDate(startDate) || !validDate(endDate) || startDate > endDate || bmsNumbers.some(sn => !validSN(sn))) {
       throw fault('报警查询日期或设备编号无效');
     }
-    await this.ensureLogin();
     const page = this.config.alarmPath ?? '/Reports/BatteryAlarmRecord';
     const fastItems = [`${startDate} ~ ${endDate}`, bmsNumbers.join(','), '', '', '3,2',
       this.config.vendor ?? 'JY', '', '0', '', ''].join(';');
-    const sortField = 'o.BatteryAlarmId';
+    return { page, fastItems, sortField: 'o.BatteryAlarmId' };
+  }
+
+  readAlarmTable({ page, fastItems, sortField }, { pageNumber = 1, limit = 1, sortType = 'desc' } = {}) {
+    return this.withSession(() => this.http.withReportToken(page, async token =>
+      tablePayload(await this.http.read(`${page}/TableSource`, {
+        form: { ...tableForm(token, fastItems, sortField, limit), sortType, page: String(pageNumber) },
+        referrer: page, format: 'json',
+      }))));
+  }
+
+  async queryAlarmAndDownload(range, { bmsNumbers = [] } = {}) {
+    const query = this.alarmQuery(range, bmsNumbers);
+    await this.ensureLogin();
+    const { count: resultCount, code, data } = await this.readAlarmTable(query);
+    if (data.length !== Math.min(1, resultCount)) throw fault('报警列表行数与总数不一致');
+    const maxRows = Math.min(this.config.maxDownloadRows ?? 20000, 20000);
+    if (resultCount > maxRows) throw Object.assign(fault(`筛选后共有 ${resultCount} 条，超过单次导出上限 ${maxRows}`, 'EXPORT_LIMIT'), { resultCount });
+    if (resultCount === 0 && code === 1) return { resultCount, confirmedEmpty: true };
+    const { page, fastItems, sortField } = query;
+    const params = new URLSearchParams({ otherWhere: '', fastItems, sortField, sortType: 'desc', title: '电池报警记录' });
     return this.withSession(async () => {
-      const { count: resultCount, code, data } = await this.http.withReportToken(page, async token =>
-        tablePayload(await this.http.read(`${page}/TableSource`, {
-          form: tableForm(token, fastItems, sortField, 1), referrer: page, format: 'json',
-        })));
-      if (data.length !== Math.min(1, resultCount)) throw fault('报警列表行数与总数不一致');
-      const maxRows = Math.min(this.config.maxDownloadRows ?? 20000, 20000);
-      if (resultCount > maxRows) throw fault(`筛选后共有 ${resultCount} 条，超过单次导出上限 ${maxRows}`, 'EXPORT_LIMIT');
-      if (resultCount === 0 && code === 1) return { resultCount, confirmedEmpty: true };
-      const query = new URLSearchParams({ otherWhere: '', fastItems, sortField, sortType: 'desc', title: '电池报警记录' });
-      const buffer = await this.http.read(`${page}/DownloadData?${query}`, { referrer: page, format: 'binary' });
+      const buffer = await this.http.read(`${page}/DownloadData?${params}`, { referrer: page, format: 'binary' });
       if (buffer.length < 4 || buffer.readUInt32LE(0) !== 0x04034b50) throw fault('报警导出未返回 XLSX');
       return { buffer, resultCount };
     });
+  }
+
+  async queryAlarmPages(range, { bmsNumbers = [], end, minimumCount } = {}) {
+    const query = this.alarmQuery(range, bmsNumbers);
+    if (range.startDate !== range.endDate) throw fault('报警分页需要单个日历日');
+    await this.ensureLogin();
+    return readAlarmPages(({ page, ...options }) => this.readAlarmTable(query, { ...options, pageNumber: page }),
+      { date: range.startDate, vendor: this.config.vendor ?? 'JY', bmsNumbers, end, minimumCount });
   }
 
   async readBatterySummaries(batch) {

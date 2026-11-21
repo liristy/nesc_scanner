@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      alarm_window:
+        description: 'dev 只读验收指定日的完整报警窗口，不生成日报'
+        required: false
+        default: false
+        type: boolean
       online_cells:
         description: '从私有跟踪名单选择在线设备，并要求完整读取实时电芯'
         required: false
@@ -87,14 +92,17 @@ jobs:
           JY_PROGRESS_TOKEN: ${{ github.token }}
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
           JY_PRIVATE_QUERY_ID: ${{ inputs.private_query_id }}
+          JY_CHECK_ALARM_WINDOW: ${{ inputs.alarm_window }}
         run: |
           mkdir -p run/private-logs
-          if [[ -z "$JY_PRIVATE_QUERY_ID" ]]; then
+          if [[ "$JY_CHECK_ALARM_WINDOW" == "true" ]]; then
+            node ../scripts/verify-alarm-window.mjs > run/private-logs/check.log 2>&1
+          elif [[ -z "$JY_PRIVATE_QUERY_ID" ]]; then
             node ../scripts/verify-collector-speed.mjs > run/private-logs/check.log 2>&1
           fi
       - name: 专项只读核查
         id: investigation
-        if: github.ref_name == 'dev' && inputs.private_query_id != ''
+        if: github.ref_name == 'dev' && inputs.private_query_id != '' && !inputs.alarm_window
         continue-on-error: true
         env:
           JY_ALARM_USERNAME: ${{ secrets.JY_ALARM_USERNAME }}

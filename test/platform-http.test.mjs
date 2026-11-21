@@ -17,6 +17,10 @@ const empty = { code: 1, msg: '无数据', count: 0, data: [] };
 const alarmFilters = `${date} ~ ${date};${sn};;;3,2;JY;;0;;`;
 const heartbeat = (id, time) => ({ BatteryHeartbeatId: id, TCreateTime: `${date} ${time}`,
   TMinVoltage: '3.20[1]', TMaxVoltage: '3.21[2]', TBatteryHeartbeatStatus: '心跳数据' });
+const alarmRow = (id, time = '12:00:00') => ({
+  BatteryAlarmId: id, TCreateTime: `${date} ${time}`, TFinishTime: null, BatteryCode: sn,
+  ErrorLevel: '保护', ErrorText: '电量不足', TError: '保护:电量不足', TProcessStatus: '待处理', TManufacture: 'JY',
+});
 const window = { startDate: date, endDate: date, reportDate: date };
 const parseOptions = { vendor: 'JY', start: parsePlatformDateTime(date), end: parsePlatformDateTime('2026-10-04') };
 
@@ -35,7 +39,7 @@ async function workbook() {
 async function fixture(t, options = {}) {
   const calls = [], errors = [];
   const xlsx = await workbook();
-  let detailVisits = 0, sourceRequests = 0;
+  let detailVisits = 0, sourceRequests = 0, alarmGrowth = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     const reply = (body, contentType = 'text/html') => {
@@ -76,6 +80,17 @@ async function fixture(t, options = {}) {
           assert.equal(form.get(tokenName), 'alarm-token');
           assert.equal(form.get('fastItems'), alarmFilters);
           assert.equal(form.get('sortField'), 'o.BatteryAlarmId');
+          if (options.alarmPages) {
+            const ascending = form.get('sortType') === 'asc';
+            const page = Number(form.get('page')), limit = Number(form.get('limit'));
+            const offset = (page - 1) * limit;
+            if (ascending && options.newAlarm) alarmGrowth = true;
+            const records = alarmGrowth ? [...options.alarmPages, options.newAlarm] : options.alarmPages;
+            const sorted = ascending ? records : [...records].reverse();
+            const rows = sorted.slice(offset, offset + limit);
+            if (ascending && page === 2 && options.duplicateAlarm) rows[0] = records[offset - 1];
+            return json(table(rows, records.length));
+          }
           return json(options.emptyAlarm ? empty : table([{}], options.alarmCount ?? 1));
         case `${alarm}/DownloadData`:
           assert.equal(url.searchParams.get('fastItems'), alarmFilters);
@@ -183,16 +198,52 @@ test('认证失败、串设备和重复记录不形成完整证据', async t => 
   }
 });
 
-test('零报警有明确确认，导出 HTML、条数不符及超限均拒绝', async t => {
+test('零报警有明确确认，导出 HTML、条数不符与直接导出超限均拒绝', async t => {
   const emptyResult = await fixture(t, { emptyAlarm: true });
   assert.deepEqual(await exportAlarms(emptyResult.platform), { allRowCount: 0, rows: [] });
   assert.ok(!emptyResult.calls.includes(`GET ${alarm}/DownloadData`));
   for (const [options, error] of [[{ htmlExport: true }, /未返回 XLSX/],
-    [{ alarmCount: 2 }, { code: 'ALARM_COUNT_MISMATCH' }],
-    [{ alarmCount: 2, maxDownloadRows: 1 }, { code: 'EXPORT_LIMIT' }]]) {
+    [{ alarmCount: 2 }, { code: 'ALARM_COUNT_MISMATCH' }]]) {
     const { platform, calls } = await fixture(t, options);
     await assert.rejects(exportAlarms(platform), error);
-    if (options.maxDownloadRows) assert.ok(!calls.includes(`GET ${alarm}/DownloadData`));
+    assert.ok(calls.includes(`GET ${alarm}/DownloadData`));
+  }
+  const oversize = await fixture(t, { alarmCount: 2, maxDownloadRows: 1 });
+  await assert.rejects(oversize.platform.queryAlarmAndDownload(window, { bmsNumbers: [sn] }), { code: 'EXPORT_LIMIT' });
+  assert.ok(!oversize.calls.includes(`GET ${alarm}/DownloadData`));
+});
+
+test('单日超过 20,000 条改用分页，保留排序、字段、唯一行数及精确统计截止', async t => {
+  const burst = Array.from({ length: 20205 }, (_, index) => alarmRow(index + 1));
+  burst[0] = alarmRow(1, '11:59:59');
+  burst[1] = alarmRow(2, '12:00:01');
+  burst[201] = { ...alarmRow(202, '13:00:00'), TFinishTime: `${date} 14:00:00`, ShowVersion: 'v-fixture' };
+  const { platform, calls } = await fixture(t, { alarmPages: burst, maxDownloadRows: 20000 });
+  const parsed = await downloadAlarmRows(platform, window, {
+    ...parseOptions, start: parsePlatformDateTime(`${date} 12:00:00`),
+    end: parsePlatformDateTime(`${date} 13:00:00`), endInclusive: true,
+  }, { bmsNumbers: [sn] });
+  assert.equal(parsed.allRowCount, 20205);
+  assert.equal(parsed.rows.length, 2);
+  assert.equal(parsed.rows[0]['BMS版本'], 'v-fixture');
+  assert.equal(parsed.rows[0]['修复时间'], `${date} 14:00:00`);
+  assert.deepEqual(parsed.coverage, [{ date, requests: 104, initialCount: 20205,
+    uniqueCount: 20205, laterCount: 0, method: 'pages', windowCount: 2 }]);
+  assert.ok(!calls.includes(`GET ${alarm}/DownloadData`));
+});
+
+test('报警分页仅接受已核对的截止后新增，拒绝截止内新增和重复 ID', async t => {
+  const alarmPages = Array.from({ length: 205 }, (_, index) => alarmRow(index + 1));
+  const read = platform => downloadAlarmRows(platform, window,
+    { ...parseOptions, end: parsePlatformDateTime(cutoff), endInclusive: true }, { bmsNumbers: [sn] });
+  const accepted = await fixture(t, { alarmPages, newAlarm: alarmRow(206, '17:00:00') });
+  const result = await read(accepted.platform);
+  assert.equal(result.allRowCount, 206);
+  assert.equal(result.rows.length, 205);
+  assert.equal(result.coverage[0].laterCount, 1);
+  for (const options of [{ duplicateAlarm: true }, { newAlarm: alarmRow(206, '16:00:00') }]) {
+    const { platform } = await fixture(t, { alarmPages, ...options });
+    await assert.rejects(read(platform), { code: 'ALARM_PAGINATION_INCOMPLETE' });
   }
 });
 

@@ -62,7 +62,7 @@ export function parseWorksheetXml(xml, sharedStrings = []) {
   return rows;
 }
 
-export async function parseAlarmWorkbook(buffer, { vendor, start, end, endInclusive = false }) {
+export async function parseAlarmWorkbook(buffer, options) {
   const zip = await JSZip.loadAsync(buffer, { checkCRC32: true });
   const sheetEntry = zip.file("xl/worksheets/sheet1.xml") ?? Object.values(zip.files).find((entry) => /^xl\/worksheets\/sheet\d+\.xml$/.test(entry.name));
   if (!sheetEntry) throw new Error("导出文件中没有工作表 XML");
@@ -85,6 +85,10 @@ export async function parseAlarmWorkbook(buffer, { vendor, start, end, endInclus
     return row;
   }).filter((row) => Object.values(row).some(nonEmpty));
 
+  return normalizeAlarmRows(allRows, options);
+}
+
+export function normalizeAlarmRows(allRows, { vendor, start, end, endInclusive = false }) {
   const invalidVendor = allRows.find((row) => String(row["BMS厂商"] ?? "").trim().toUpperCase() !== vendor.toUpperCase());
   if (invalidVendor) throw new Error(`导出结果含非 ${vendor} 厂商数据，已停止，避免错误统计`);
   const invalidLevel = allRows.find((row) => !/^保护(?:\s*[:：]|$)/.test(String(row["报警（级别：类型）"] ?? "")));
