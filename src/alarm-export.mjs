@@ -1,6 +1,16 @@
 import { shiftDay } from './calendar.mjs';
 import { normalizeAlarmRows, parseAlarmWorkbook } from './xlsx.mjs';
 
+export async function readPagedAlarmRows(platform, range, parseOptions, { bmsNumbers = [], minimumCount } = {}) {
+  const { rows, proof } = await platform.queryAlarmPages(range, { bmsNumbers, end: parseOptions.end, minimumCount });
+  const parsed = normalizeAlarmRows(rows, parseOptions);
+  if (proof.uniqueCount !== parsed.allRowCount) {
+    throw Object.assign(new Error('报警分页唯一行数与已读结果不符'), { code: 'ALARM_PAGINATION_INCOMPLETE' });
+  }
+  platform.logger?.info(`报警分页已核对 ${range.startDate}：${parsed.allRowCount}条，统计区间内${parsed.rows.length}条。`);
+  return { ...parsed, coverage: [{ ...proof, method: 'pages', windowCount: parsed.rows.length }] };
+}
+
 // The platform filters whole calendar dates. Split inclusive date ranges into
 // disjoint days, then apply the original precise audit cutoff to every export.
 export async function downloadAlarmRows(platform, window, parseOptions, { bmsNumbers = [] } = {}) {
@@ -26,13 +36,7 @@ export async function downloadAlarmRows(platform, window, parseOptions, { bmsNum
         children = [[range, sns.slice(0, middle)], [range, sns.slice(middle)]];
       } else if (days === 0 && typeof platform.queryAlarmPages === 'function') {
         platform.logger?.warn(`报警导出超限，改为逐页核对 ${range.startDate} 的全部记录。`);
-        const { rows, proof } = await platform.queryAlarmPages(range, {
-          bmsNumbers: sns, end: parseOptions.end, minimumCount: error.resultCount,
-        });
-        const parsed = normalizeAlarmRows(rows, parseOptions);
-        if (proof.uniqueCount !== parsed.allRowCount) throw Object.assign(new Error('报警分页唯一行数与已读结果不符'), { code: 'ALARM_PAGINATION_INCOMPLETE' });
-        platform.logger?.info(`报警分页已核对 ${range.startDate}：${parsed.allRowCount}条，统计区间内${parsed.rows.length}条。`);
-        return { ...parsed, coverage: [{ ...proof, method: 'pages', windowCount: parsed.rows.length }] };
+        return readPagedAlarmRows(platform, range, parseOptions, { bmsNumbers: sns, minimumCount: error.resultCount });
       } else {
         throw Object.assign(new Error(`${range.startDate}单日报警仍超过单次导出上限，无法继续按日期拆分；${error.message}`), { code: 'EXPORT_LIMIT' });
       }

@@ -16,6 +16,10 @@ on:
         required: false
         default: false
         type: boolean
+      alarm_end_at:
+        description: 'dev 报警验收的北京时间截止 YYYY-MM-DD HH:mm:ss（留空为 16:00）'
+        required: false
+        type: string
       online_cells:
         description: '从私有跟踪名单选择在线设备，并要求完整读取实时电芯'
         required: false
@@ -93,6 +97,7 @@ jobs:
           JY_PROGRESS_CHECK_ID: ${{ steps.init.outputs.check_id }}
           JY_PRIVATE_QUERY_ID: ${{ inputs.private_query_id }}
           JY_CHECK_ALARM_WINDOW: ${{ inputs.alarm_window }}
+          JY_CHECK_ALARM_END_AT: ${{ inputs.alarm_end_at }}
         run: |
           mkdir -p run/private-logs
           if [[ "$JY_CHECK_ALARM_WINDOW" == "true" ]]; then
